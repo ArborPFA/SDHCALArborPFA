@@ -6,6 +6,13 @@
 #include <TCanvas.h>
 #include <TPaveText.h>
 #include <TLegend.h>
+#include <TSystemFile.h>
+#include <TString.h>
+//#include <TIter.h>
+#include <TSystemDirectory.h>
+#include <TSystem.h>
+#include <TList.h>
+#include <TLatex.h>
 
 // -- std headers
 #include <iostream>
@@ -339,8 +346,8 @@ void TreeAnalyzer::FillSpecificNPfosGraph(TGraphErrors *pGraphErrors)
 
 	for(unsigned int i=0 ; i<nPfosVector.size() ; i++)
 	{
-		pGraphErrors->SetPoint(i, static_cast<double>(i) + 0.5 , nPfosVector.at(i) / static_cast<double>(nProcessedEvents));
-		pGraphErrors->SetPointError(i, 0.5, 0); // not an error. Just a bar to imitate an histogram ...
+		pGraphErrors->SetPoint(i, static_cast<double>(i), nPfosVector.at(i) / static_cast<double>(nProcessedEvents));
+		pGraphErrors->SetPointError(i, 0, 0);
 	}
 }
 
@@ -350,19 +357,18 @@ void TreeAnalyzer::FillSpecificNPfosGraph(TGraphErrors *pGraphErrors)
 SingleAnalysis::SingleAnalysis() :
 		m_saveGraphs(false),
 		m_rootFileDirectory("/home/remi/git/SDHCALArborPFA/output/v01-04-00/Separation/"),
-		m_treeName("PfoMonitoring")
+		m_treeName("PfoMonitoring"),
+		m_computeSystematics(false)
 {
-  std::cout << "Constructor SingleAnalysis() !" << std::endl;
-  
-  // default list of data set to process
-  m_dataTypeVector.push_back(TB_SPS_AUG_2012);
-  m_dataTypeVector.push_back(FTFP_BERT_HP);
-  m_dataTypeVector.push_back(FTF_BIC);
-   
-  // set to be read from a simple file
-  m_dataSourceBitSet.set(TB_SPS_AUG_2012_NO_PFA, true);
-  m_dataSourceBitSet.set(FTFP_BERT_HP_NO_PFA, true);
-  m_dataSourceBitSet.set(FTF_BIC_NO_PFA, true);
+	// default list of data set to process
+	m_dataTypeVector.push_back(TB_SPS_AUG_2012);
+	m_dataTypeVector.push_back(FTFP_BERT_HP);
+	m_dataTypeVector.push_back(FTF_BIC);
+
+	// set to be read from a simple file
+	m_dataSourceBitSet.set(TB_SPS_AUG_2012_NO_PFA, true);
+	m_dataSourceBitSet.set(FTFP_BERT_HP_NO_PFA, true);
+	m_dataSourceBitSet.set(FTF_BIC_NO_PFA, true);
 }
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -430,6 +436,13 @@ void SingleAnalysis::SetDataTypeList(const DataTypeVector &dataTypeVector)
 
 //--------------------------------------------------------------------------------------------------------------------
 
+void SingleAnalysis::SetComputeSystematics(bool compute)
+{
+	m_computeSystematics = compute;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
 void SingleAnalysis::ConfigureMultiGraphMap()
 {
 	std::cout << "Configuring multi graph map" << std::endl;
@@ -488,144 +501,293 @@ void SingleAnalysis::FillGraphs()
 {
   std::cout << "Filling graphs" << std::endl;
 
-  for(DataTypeVector::const_iterator dataIter = m_dataTypeVector.begin(), dataEndIter = m_dataTypeVector.end() ;
-      dataEndIter != dataIter ; ++dataIter)
-    {
-      DataType dataType = *dataIter;
+	for(DataTypeVector::const_iterator dataIter = m_dataTypeVector.begin(), dataEndIter = m_dataTypeVector.end() ;
+			dataEndIter != dataIter ; ++dataIter)
+	{
+		DataType dataType = *dataIter;
 
-      if( m_dataSourceBitSet.test(dataType) )
-	{
-	  this->FillFromFile(dataType);
+		if( m_dataSourceBitSet.test(dataType) )
+		{
+			this->FillFromFile(dataType);
+		}
+		else
+		{
+			this->FillFromTree(dataType);
+		}
 	}
-      else
-	{
-	  this->FillFromTree(dataType);
-	}
-    }
 }
 
 //--------------------------------------------------------------------------------------------------------------------
 
 void SingleAnalysis::FillFromTree(DataType dataType)
 {
-  DrawAttributeMapping drawAttributeMapping(dataType);
+	DrawAttributeMapping drawAttributeMapping(dataType);
 
-  GraphMap graphMap;
-  graphMap[EFFICIENCY] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[N_PFOS] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[N_PFOS_20GEV] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[N_PFOS_70GEV] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	GraphMap graphMap;
+	graphMap[EFFICIENCY] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[N_PFOS] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[N_PFOS_20GEV] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[N_PFOS_70GEV] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
 
-  int pointID = 0;
+	int pointID = 0;
 
-  for(IntVector::iterator iter = m_energies.begin(), endIter = m_energies.end() ;
-      endIter != iter ; ++iter)
-    {
-      int energy = *iter;
-
-      std::string completeFileName =
-	m_rootFileDirectory
-	+ this->GetDataName(dataType)
-	+ "/"
-	+ this->GetFileName(energy, dataType);
-
-      TFile *pFile = TFile::Open(completeFileName.c_str());
-
-      if(!pFile)
-	throw std::runtime_error("Wrong file name !");
-
-      TTree *pTree = (TTree *) pFile->Get(m_treeName.c_str());
-
-      if(!pTree)
-	throw std::runtime_error("Wrong tree name !");
-
-      TreeAnalyzer treeAnalyzer(pTree);
-      treeAnalyzer.Loop(pointID, static_cast<double>(energy), graphMap);
-
-      if(energy == 20)
+	for(IntVector::iterator iter = m_energies.begin(), endIter = m_energies.end() ;
+			endIter != iter ; ++iter)
 	{
-	  treeAnalyzer.FillSpecificNPfosGraph(graphMap[N_PFOS_20GEV]);
+		int energy = *iter;
+
+		std::string completeFileName =
+			m_rootFileDirectory
+			+ this->GetDataName(dataType)
+			+ "/"
+			+ this->GetFileName(energy, dataType);
+
+		TFile *pFile = TFile::Open(completeFileName.c_str());
+
+		if(!pFile)
+			throw std::runtime_error("Wrong file name !");
+
+		TTree *pTree = (TTree *) pFile->Get(m_treeName.c_str());
+
+		if(!pTree)
+			throw std::runtime_error("Wrong tree name !");
+
+		TreeAnalyzer treeAnalyzer(pTree);
+		treeAnalyzer.Loop(pointID, static_cast<double>(energy), graphMap);
+
+		if(energy == 20)
+		{
+			treeAnalyzer.FillSpecificNPfosGraph(graphMap[N_PFOS_20GEV]);
+		}
+		else if(energy == 70)
+		{
+			treeAnalyzer.FillSpecificNPfosGraph(graphMap[N_PFOS_70GEV]);
+		}
+
+		// compute systematic errors if required !
+		if( m_computeSystematics )
+			this->ComputeSystematics(pointID, energy, dataType, graphMap);
+
+		pointID++;
 	}
-      else if(energy == 70)
-	{
-	  treeAnalyzer.FillSpecificNPfosGraph(graphMap[N_PFOS_70GEV]);
-	}
 
-      pointID++;
-    }
-
-  // Add graphs in multi graph map
-  for(GraphMap::const_iterator graphIter = graphMap.begin(), graphEndIter = graphMap.end() ;
-      graphEndIter != graphIter ; ++graphIter)
-    m_canvasMultiGraphMap[graphIter->first].second->Add(graphIter->second);
-
+	// Add graphs in multi graph map
+	for(GraphMap::const_iterator graphIter = graphMap.begin(), graphEndIter = graphMap.end() ;
+			graphEndIter != graphIter ; ++graphIter)
+	m_canvasMultiGraphMap[graphIter->first].second->Add(graphIter->second);
 }
 
 //--------------------------------------------------------------------------------------------------------------------
 
 void SingleAnalysis::FillFromFile(DataType dataType)
 {
-  DrawAttributeMapping drawAttributeMapping(dataType);
-  GraphMap graphMap;
-  
-  graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-  graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	DrawAttributeMapping drawAttributeMapping(dataType);
+	GraphMap graphMap;
 
-  int pointID = 0;
+	graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
 
-  std::ifstream ifile;
-  std::string completeFileName =
-	m_rootFileDirectory
-	+ this->GetDataName(dataType)
-	+ "/"
-	+ this->GetBasicFileName(dataType);
+	int pointID = 0;
 
-  std::cout << "File name is " << completeFileName << std::endl;
+	std::ifstream ifile;
+	std::string completeFileName =
+		m_rootFileDirectory
+		+ this->GetDataName(dataType)
+		+ "/"
+		+ this->GetBasicFileName(dataType);
 
-  ifile.open( completeFileName.c_str(), std::ios::in );
+	std::cout << "File name is " << completeFileName << std::endl;
 
-  if( ! ifile.is_open() || ! ifile.good() )
-    throw std::runtime_error("Wrong file name !");
+	ifile.open( completeFileName.c_str(), std::ios::in );
 
-  unsigned int nEnergies = 0;
-  ifile >> nEnergies;
+	if( ! ifile.is_open() || ! ifile.good() )
+		throw std::runtime_error("Wrong file name !");
 
-  if( 0 == nEnergies )
-    throw std::runtime_error("Invalid n energy points");
+	unsigned int nEnergies = 0;
+	ifile >> nEnergies;
 
-  for( unsigned int e=0 ; e<nEnergies ; e++ )
-    {
-      int energy = 0;
-      ifile >> energy;
+	if( 0 == nEnergies )
+		throw std::runtime_error("Invalid n energy points");
 
-      std::cout << "Energy is " << energy << std::endl;
+	for( unsigned int e=0 ; e<nEnergies ; e++ )
+	{
+		int energy = 0;
+		ifile >> energy;
 
-      float erec, erecError, eresol, eresolError, erecDev, erecDevError = 0.f;
-      ifile >> erec >> erecError >> eresol >> eresolError;
+		std::cout << "Energy is " << energy << std::endl;
 
-      std::cout << "Erec " << erec << " , erecError " << erecError << " , eresol " << eresol << " , eresolError " << eresolError << std::endl;
+		float erec, erecError, eresol, eresolError, erecDev, erecDevError = 0.f;
+		ifile >> erec >> erecError >> eresol >> eresolError;
 
-      erecDev = (erec - energy) / energy;
-      erecDevError = erecError / energy;
+		std::cout << "Erec " << erec << " , erecError " << erecError << " , eresol " << eresol << " , eresolError " << eresolError << std::endl;
 
-      graphMap[E_REC]->SetPoint(e, energy, erec);
-      graphMap[E_REC]->SetPointError(e, 0, erecError);
+		erecDev = (erec - energy) / energy;
+		erecDevError = erecError / energy;
 
-      graphMap[E_REC_DEVIATION]->SetPoint(e, energy, erecDev);
-      graphMap[E_REC_DEVIATION]->SetPointError(e, 0, erecDevError);
+		graphMap[E_REC]->SetPoint(e, energy, erec);
+		graphMap[E_REC]->SetPointError(e, 0, erecError);
 
-      graphMap[E_RESOL]->SetPoint(e, energy, eresol);
-      graphMap[E_RESOL]->SetPointError(e, 0, eresolError);
-    }
+		graphMap[E_REC_DEVIATION]->SetPoint(e, energy, erecDev);
+		graphMap[E_REC_DEVIATION]->SetPointError(e, 0, erecDevError);
 
-  // Add graphs in multi graph map
-  for(GraphMap::const_iterator graphIter = graphMap.begin(), graphEndIter = graphMap.end() ;
-      graphEndIter != graphIter ; ++graphIter)
-    m_canvasMultiGraphMap[graphIter->first].second->Add(graphIter->second);
+		graphMap[E_RESOL]->SetPoint(e, energy, eresol);
+		graphMap[E_RESOL]->SetPointError(e, 0, eresolError);
+	}
+
+	// Add graphs in multi graph map
+	for(GraphMap::const_iterator graphIter = graphMap.begin(), graphEndIter = graphMap.end() ;
+			graphEndIter != graphIter ; ++graphIter)
+		m_canvasMultiGraphMap[graphIter->first].second->Add(graphIter->second);
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void SingleAnalysis::ComputeSystematics(int pointID, int energy, DataType dataType, GraphMap &graphMapAtNominalValues)
+{
+	TSystemDirectory directory((m_rootFileDirectory + this->GetDataName(dataType)
+			+ "/SYSTEMATICS/").c_str(), (m_rootFileDirectory + this->GetDataName(dataType)
+					+ "/SYSTEMATICS/").c_str());
+	TList *pFileList = directory.GetListOfFiles();
+
+	if( ! pFileList )
+	{
+		std::cout << "No systematics study performed. Directory '" << m_rootFileDirectory + this->GetDataName(dataType)
+					+ "/SYSTEMATICS/" << "' doesn't exists" << std::endl;
+		return;
+	}
+
+	std::vector<std::string> pm;
+	pm.push_back("+");
+	pm.push_back("-");
+
+	GraphSystErrorMap upperErrorMap;
+	GraphSystErrorMap lowerErrorMap;
+
+	upperErrorMap[EFFICIENCY] = 0.d;
+	upperErrorMap[E_REC] = 0.d;
+	upperErrorMap[E_REC_DEVIATION] = 0.d;
+	upperErrorMap[E_RESOL] = 0.d;
+	upperErrorMap[N_PFOS] = 0.d;
+
+	lowerErrorMap[EFFICIENCY] = 0.d;
+	lowerErrorMap[E_REC] = 0.d;
+	lowerErrorMap[E_REC_DEVIATION] = 0.d;
+	lowerErrorMap[E_RESOL] = 0.d;
+	lowerErrorMap[N_PFOS] = 0.d;
+
+	for(unsigned int sp=DISTANCE_1 ; sp<N_SYSTEMATIC_PARAMETERS ; sp++)
+	{
+		unsigned int parameterID = sp+1;
+
+		for(unsigned int signID=0 ; signID<pm.size() ; signID++)
+		{
+			std::string sign = pm.at( signID );
+
+			TString fileName =
+					"SingleParticleReconstruction_"
+					+ this->GetEnergyToString(dataType, energy)
+					+ "_cut_ArborPFA_"
+					+ this->GetDataName(dataType)
+					+ "_P"
+					+ TString::UItoa(parameterID, 10)
+					+ "_S" + sign + "_basic.root";
+
+			std::cout << "File name is " << fileName << " !!!!!" << std::endl;
+
+			TString completeFileName = m_rootFileDirectory + this->GetDataName(dataType)
+					+ "/SYSTEMATICS/" + fileName;
+
+			TFile *pFile = TFile::Open(completeFileName.Data());
+
+			if( ! pFile )
+			{
+				std::cerr << "Wrong sys file name !" << std::endl;
+				continue;
+			}
+
+			TTree *pTree = (TTree *) pFile->Get(m_treeName.c_str());
+
+			if(!pTree)
+			{
+				std::cerr << "Wrong sys tree name !" << std::endl;
+				continue;
+			}
+
+			GraphMap graphMap;
+			graphMap[EFFICIENCY] = new TGraphErrors();
+			graphMap[E_REC] = new TGraphErrors();
+			graphMap[E_REC_DEVIATION] = new TGraphErrors();
+			graphMap[E_RESOL] = new TGraphErrors();
+			graphMap[N_PFOS] = new TGraphErrors();
+
+			TreeAnalyzer treeAnalyzer(pTree);
+			treeAnalyzer.Loop(pointID, static_cast<double>(energy), graphMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					EFFICIENCY, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					E_REC, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					E_REC_DEVIATION, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					E_RESOL, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					N_PFOS, upperErrorMap, lowerErrorMap);
+		}
+	}
+
+	delete pFileList;
+
+	// First try : combine upper and lower values for efficiency
+	graphMapAtNominalValues[EFFICIENCY]->SetPointError(pointID, 0,
+			graphMapAtNominalValues[EFFICIENCY]->GetEY()[pointID]
+		+ std::sqrt( upperErrorMap[EFFICIENCY] + lowerErrorMap[EFFICIENCY] ) );
+
+	graphMapAtNominalValues[E_REC]->SetPointError(pointID, 0,
+			graphMapAtNominalValues[E_REC]->GetEY()[pointID]
+		+ std::sqrt( upperErrorMap[E_REC] + lowerErrorMap[E_REC] ) );
+
+	graphMapAtNominalValues[E_REC_DEVIATION]->SetPointError(pointID, 0,
+			graphMapAtNominalValues[E_REC_DEVIATION]->GetEY()[pointID]
+		+ std::sqrt( upperErrorMap[E_REC_DEVIATION] + lowerErrorMap[E_REC_DEVIATION] ) );
+
+	graphMapAtNominalValues[E_RESOL]->SetPointError(pointID, 0,
+			graphMapAtNominalValues[E_RESOL]->GetEY()[pointID]
+		+ std::sqrt( upperErrorMap[E_RESOL] + lowerErrorMap[E_RESOL] ) );
+
+	graphMapAtNominalValues[N_PFOS]->SetPointError(pointID, 0,
+			graphMapAtNominalValues[N_PFOS]->GetEY()[pointID]
+		+ std::sqrt( upperErrorMap[N_PFOS] + lowerErrorMap[N_PFOS] ) );
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void SingleAnalysis::ComputeSystematics(int pointID, const GraphMap &nominalMap, const GraphMap &systGraphMap,
+		GraphName graphName, GraphSystErrorMap &upperBoundErrorMap, GraphSystErrorMap &lowerBoundErrorMap)
+{
+	double systVar = 0.d;
+	double nominalVar = 0.d;
+	double systVarDiff = 0.d;
+
+	nominalVar = nominalMap.find(graphName)->second->GetY()[pointID];
+	systVar = systGraphMap.find(graphName)->second->GetY()[pointID];
+	systVarDiff = systVar - nominalVar;
+
+	std::cout << "Graph name : " << graphName << std::endl;
+	std::cout << "syst error on point id " << pointID << " is " << systVarDiff << std::endl;
+
+	if( systVarDiff > 0.d )
+		upperBoundErrorMap[graphName] += systVarDiff*systVarDiff;
+	else
+		lowerBoundErrorMap[graphName] += systVarDiff*systVarDiff;
 }
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -686,6 +848,13 @@ void SingleAnalysis::DrawGraphs()
 	pERecDeviationPad->SetFrameBorderMode(0);
 
 	m_canvasMultiGraphMap[E_REC_DEVIATION].second->Draw("ap");
+
+	TF1 *pLin = new TF1("lin", "0", 0, 90);
+	pLin->SetLineColor(kBlack);
+	pLin->SetLineWidth(1);
+	pLin->SetLineStyle(2);
+	pLin->Draw("same");
+
 	this->PostDrawMultiGraph(E_REC_DEVIATION, m_canvasMultiGraphMap[E_REC_DEVIATION].second);
 
 	pERecDeviationPad->Modified();
@@ -872,6 +1041,7 @@ void SingleAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMulti
 	}
 	case E_REC_DEVIATION:
 	{
+		pMultiGraph->GetXaxis()->SetTitle("E_{beam} [GeV]");
 		pMultiGraph->GetXaxis()->SetLabelFont(42);
 		pMultiGraph->GetXaxis()->SetLabelSize(0.07);
 		pMultiGraph->GetXaxis()->SetTitleSize(0.1);
@@ -926,7 +1096,7 @@ void SingleAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMulti
 		break;
 	case E_REC_DEVIATION:
 		pMultiGraph->GetYaxis()->SetTitle("#DeltaE/E_{beam}");
-		pMultiGraph->GetYaxis()->SetRangeUser(-0.22, 0.22);
+		pMultiGraph->GetYaxis()->SetRangeUser(-0.12, 0.12);
 		break;
 	case E_RESOL:
 		pMultiGraph->GetYaxis()->SetTitle("#sigma_{E}/E_{rec}");
@@ -938,6 +1108,14 @@ void SingleAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMulti
 		break;
 	case N_PFOS_20GEV:
 	case N_PFOS_70GEV:
+		pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+		pMultiGraph->GetYaxis()->SetRangeUser(0, 1);
+		pMultiGraph->GetXaxis()->SetRangeUser(-0.99, 5.99);
+		break;
+	case EFFICIENCY:
+		pMultiGraph->GetYaxis()->SetTitle("Hit clustering efficiency #epsilon_{s}");
+		pMultiGraph->GetYaxis()->SetRangeUser(0.8, 1.1);
+		break;
 	default:
 		break;
 	}

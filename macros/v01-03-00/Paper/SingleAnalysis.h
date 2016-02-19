@@ -19,14 +19,14 @@
  */
 enum DrawAttribute
 {
-  MARKER_STYLE,
-  MARKER_COLOR,
-  MARKER_SIZE,
-  LINE_COLOR,
-  LINE_STYLE,
-  LINE_WIDTH,
-  FILL_COLOR,
-  FILL_STYLE
+	MARKER_STYLE,
+	MARKER_COLOR,
+	MARKER_SIZE,
+	LINE_COLOR,
+	LINE_STYLE,
+	LINE_WIDTH,
+	FILL_COLOR,
+	FILL_STYLE
 };
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -36,15 +36,15 @@ enum DrawAttribute
  */
 enum DataType
 {
-  TB_SPS_AUG_2012_NO_PFA,
-  FTFP_BERT_HP_NO_PFA,
-  FTF_BIC_NO_PFA,
-  TB_SPS_AUG_2012,
-  TB_SPS_AUG_2012_SPILL_CUT,
-  TB_SPS_AUG_2012_SPILL_CUT_CALIB,
-  FTFP_BERT_HP,
-  FTF_BIC,
-  N_DATA_TYPES
+	TB_SPS_AUG_2012_NO_PFA,
+	FTFP_BERT_HP_NO_PFA,
+	FTF_BIC_NO_PFA,
+	TB_SPS_AUG_2012,
+	TB_SPS_AUG_2012_SPILL_CUT,
+	TB_SPS_AUG_2012_SPILL_CUT_CALIB,
+	FTFP_BERT_HP,
+	FTF_BIC,
+	N_DATA_TYPES
 };
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -54,13 +54,31 @@ enum DataType
  */
 enum GraphName
 {
-  EFFICIENCY,
-  E_REC,
-  E_REC_DEVIATION,
-  E_RESOL,
-  N_PFOS,
-  N_PFOS_20GEV,
-  N_PFOS_70GEV
+	EFFICIENCY,
+	E_REC,
+	E_REC_DEVIATION,
+	E_RESOL,
+	N_PFOS,
+	N_PFOS_20GEV,
+	N_PFOS_70GEV
+};
+
+//--------------------------------------------------------------------------------------------------------------------
+
+/**
+ *  @brief  SystematicsParameters enum
+ */
+enum SystematicsParameters
+{
+	DISTANCE_1,
+	DISTANCE_2,
+	ANGLE,
+	BCK_1,
+	FWD_1,
+	BCK_2,
+	FWD_3,
+	N_OBJECTS,
+	N_SYSTEMATIC_PARAMETERS
 };
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -74,6 +92,7 @@ std::string DataTypeToDrawableString(DataType dataType);
 //--------------------------------------------------------------------------------------------------------------------
 
 typedef std::map<GraphName, TGraphErrors *> GraphMap;
+typedef std::map<GraphName, double> GraphSystErrorMap;
 typedef std::map<DrawAttribute, float> DrawAttributeMap;
 typedef std::pair<TCanvas*, TMultiGraph*> CanvasMultiGraphPair;
 typedef std::map<GraphName, CanvasMultiGraphPair> CanvasMultiGraphMap;
@@ -211,7 +230,7 @@ public:
 	/**
 	 *  @brief  Default constructor
 	 */
-        SingleAnalysis();
+	SingleAnalysis();
 
 	/**
 	 *  @brief  Destructor
@@ -244,6 +263,12 @@ public:
 	 *  @brief  Set data type list to process
 	 */
 	void SetDataTypeList(const DataTypeVector &dataTypeVector);
+
+	/**
+	 *  @brief  Whether to compute the systematic errors.
+	 *          Requires additional files. Default is false
+	 */
+	void SetComputeSystematics(bool compute = true);
 
 private:
 	/**
@@ -314,6 +339,18 @@ private:
 	 */
 	void PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMultiGraph) const;
 
+	/**
+	 *  @brief  Compute systematic errors for the target energy and data type using
+	 *          graph points at nominal values. The point id is used to fill the graph
+	 *          at the correct place
+	 */
+	void ComputeSystematics(int pointID, int energy, DataType dataType, GraphMap &graphMapAtNominalValues);
+
+	/**
+	 */
+	void ComputeSystematics(int pointID, const GraphMap &nominalMap, const GraphMap &systGraphMap,
+			GraphName graphName, GraphSystErrorMap &upperBoundErrorMap, GraphSystErrorMap &lowerBoundErrorMap);
+
 private:
 	IntVector                    m_energies;
 
@@ -323,6 +360,7 @@ private:
 	std::bitset<N_DATA_TYPES>    m_dataSourceBitSet;
 
 	bool                         m_saveGraphs;
+	bool                         m_computeSystematics;
 	std::string                  m_rootFileDirectory;
 	std::string                  m_treeName;
 };
