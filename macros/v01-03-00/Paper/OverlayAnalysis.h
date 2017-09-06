@@ -4,7 +4,7 @@
 // -- root headers
 #include <TChain.h>
 #include <TFile.h>
-#include <TGraphErrors.h>
+#include <TGraphAsymmErrors.h>
 #include <TCanvas.h>
 #include <TGraph.h>
 #include <TMultiGraph.h>
@@ -36,8 +36,8 @@ enum DrawAttribute
 enum DataType
 {
 	TB_SPS_AUG_2012,
-	FTFP_BERT_HP,
-	FTF_BIC
+	FTF_BIC,
+	FTFP_BERT_HP
 };
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -51,7 +51,28 @@ enum GraphName
 	NEUTRAL_PURITY,
 	NEUTRAL_EFFICIENCY,
 	NEUTRAL_RECOVER_PROBA,
-	NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT
+	NEUTRAL_ENERGY_DIFFERENCE,
+	NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT,
+	N_OVERLAID_HITS,
+	OVERLAID_HITS_PERCENTAGE
+};
+
+//--------------------------------------------------------------------------------------------------------------------
+
+/**
+ *  @brief  SystematicsParameters enum
+ */
+enum SystematicsParameters
+{
+	DISTANCE_1,
+	DISTANCE_2,
+	ANGLE,
+	BCK_1,
+	FWD_1,
+	BCK_2,
+	FWD_3,
+	N_OBJECTS,
+	N_SYSTEMATIC_PARAMETERS
 };
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -62,14 +83,45 @@ enum GraphName
  */
 std::string DataTypeToDrawableString(DataType dataType);
 
+/**
+ *  @brief  Get the data type converted to string.
+ *          Used in concatenation in file name construction
+ */
+std::string GetDataName(DataType dataType);
+
+/**
+ *  @brief  Build a root file name from different parameters
+ */
+std::string GetFileName(int neutralEnergy, int chargedEnergy, unsigned int distance, DataType dataType);
+
+/**
+ *  @brief  Get the energy converted converted to string.
+ *          Used in GetFileName() to convert energy in "EGeV" or run number for test beam data
+ */
+std::string GetEnergyToString(DataType dataType, int energy);
+
+/**
+ *  @brief  Create and configure a TCanvas
+ */
+TCanvas *CreateCanvas(const std::string &canvasName, const std::string &canvasTitle);
+
+/**
+ *  @brief  Create and configure a TMultiGraph
+ */
+TMultiGraph *CreateMultiGraph();
+
 //--------------------------------------------------------------------------------------------------------------------
 
-typedef std::map<GraphName, TGraphErrors *> GraphMap;
+typedef std::map<GraphName, TGraphAsymmErrors *> GraphMap;
+typedef std::map<GraphName, double> GraphSystErrorMap;
 typedef std::map<DrawAttribute, float> DrawAttributeMap;
 typedef std::pair<TCanvas*, TMultiGraph*> CanvasMultiGraphPair;
 typedef std::map<GraphName, CanvasMultiGraphPair> CanvasMultiGraphMap;
 typedef std::vector<DataType> DataTypeVector;
 typedef std::vector<int> IntVector;
+
+#pragma link C++ class DataTypeVector;
+#pragma link C++ class IntVector;
 
 //--------------------------------------------------------------------------------------------------------------------
 //--------------------------------------------------------------------------------------------------------------------
@@ -93,7 +145,7 @@ public:
 	/**
 	 *  @brief  Configure the graph
 	 */
-	TGraphErrors *ConfigureGraph(TGraphErrors *pGraph);
+	TGraphAsymmErrors *ConfigureGraph(TGraphAsymmErrors *pGraph, int chargedEnergy);
 
 private:
 	DrawAttributeMap    m_drawAttributeMap;
@@ -140,6 +192,26 @@ public:
 	 *          graphs at coordinate x in the graph map for the point 'pointID'
 	 */
 	void Loop(int pointID, double xGraph, GraphMap &graphMap);
+
+	/**
+	 *
+	 */
+	void FillNeutralMCEnergy(TH1 *pHistogram);
+
+	/**
+	 *
+	 */
+	void FillChargedMCEnergy(TH1 *pHistogram);
+
+	/**
+	 *
+	 */
+	void FillNOverlaidHits(TGraphAsymmErrors *pGraph);
+
+	/**
+	 *
+	 */
+	void FillOverlaidHitsPercentage(TGraphAsymmErrors *pGraph);
 
 private:
 
@@ -246,6 +318,22 @@ public:
 	 */
 	void SetSaveGraphs(bool save = true);
 
+	/**
+	 * @brief  Set data types to treat
+	 */
+	void SetDataTypes(const DataTypeVector &dataTypes);
+
+	/**
+	 *  @brief  Whether to compute the systematic errors.
+	 *          Requires additional files. Default is false
+	 */
+	void SetComputeSystematics(bool compute = true);
+
+	/**
+	 *  @brief  Set the pave text to draw on top of each plot. Not drawn if empty
+	 */
+	void SetTextLabel(const std::string &text);
+
 private:
 	/**
 	 *  @brief  Configure all graphs before filling them (allocation + customize)
@@ -269,54 +357,86 @@ private:
 
 private:
 	/**
-	 *  @brief  Get the data type converted to string.
-	 *          Used in concatenation in file name construction
-	 */
-	std::string GetDataName(DataType dataType) const;
-
-	/**
-	 *  @brief  Build a root file name from different parameters
-	 */
-	std::string GetFileName(int neutralEnergy, int chargedEnergy, unsigned int distance, DataType dataType) const;
-
-	/**
-	 *  @brief  Get the energy converted converted to string.
-	 *          Used in GetFileName() to convert energy in "EGeV" or run number for test beam data
-	 */
-	std::string GetEnergyToString(DataType dataType, int energy) const;
-
-	/**
-	 *  @brief  Create and configure a TCanvas
-	 */
-	TCanvas *CreateCanvas(const std::string &canvasName, const std::string &canvasTitle) const;
-
-	/**
-	 *  @brief  Create and configure a TMultiGraph
-	 */
-	TMultiGraph *CreateMultiGraph() const;
-
-	/**
 	 *  @brief  Configure multi graph axis. Called after TMultiGraph::Draw()
 	 */
 	void PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMultiGraph) const;
 
+	/**
+	 *  @brief  Compute systematics for a given point
+	 */
+	void ComputeSystematics(int pointID, int neutralEnergy, int chargedEnergy, int distance, DataType dataType, GraphMap &graphMapAtNominalValues);
+
+	/**
+	 *
+	 */
+	void ComputeSystematics(int pointID, const GraphMap &nominalMap, const GraphMap &systGraphMap,
+			GraphName graphName, GraphSystErrorMap &upperBoundErrorMap, GraphSystErrorMap &lowerBoundErrorMap);
+
 private:
 
-	DataTypeVector               m_dataTypeVector;
-	CanvasMultiGraphMap          m_canvasMultiGraphMap;
+	DataTypeVector              m_dataTypeVector;
+	CanvasMultiGraphMap         m_canvasMultiGraphMap;
 
-	unsigned int               m_startDistance;
-	unsigned int               m_endDistance;
-	unsigned int               m_distanceStep;
+	unsigned int                m_startDistance;
+	unsigned int                m_endDistance;
+	unsigned int                m_distanceStep;
 	bool                        m_saveGraphs;
-	std::string                  m_rootFileDirectory;
-	std::string                  m_treeName;
+	std::string                 m_rootFileDirectory;
+	std::string                 m_treeName;
 
 	IntVector                   m_neutralEnergies;
 	IntVector                   m_chargedEnergies;
+
+	bool                        m_computeSystematics;
+
+	std::string                 m_textLabel;
 };
 
+/**
+ *
+ */
+class OverlayCheckPlotAnalysis
+{
+public:
+	/**
+	 *
+	 */
+	OverlayCheckPlotAnalysis();
 
+	/**
+	 *
+	 */
+	void SetParameters(DataType dataType, unsigned int neutralEnergy = 10, unsigned int chargedEnergy = 30,
+			unsigned int smallDistance = 5, unsigned int wideDistance = 30);
+
+	/**
+	 *
+	 */
+	void SetTextLabel(const std::string &text);
+
+	/**
+	 *
+	 */
+	void SetFileParameters(const std::string &fileDirectory, const std::string &treeName = "PfoMonitoring");
+
+	/**
+	 *
+	 */
+	void Run();
+
+private:
+	std::string                 m_fileDirectory;
+	std::string                 m_treeName;
+
+	DataType                    m_dataType;
+
+	unsigned int                m_neutralEnergy;
+	unsigned int                m_chargedEnergy;
+	unsigned int                m_smallDistance;
+	unsigned int                m_wideDistance;
+
+	std::string                 m_textLabel;
+};
 
 
 #endif

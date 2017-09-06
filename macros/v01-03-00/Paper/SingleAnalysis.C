@@ -102,7 +102,7 @@ DrawAttributeMapping::DrawAttributeMapping(DataType dataType) :
 
 	m_drawAttributeMap[LINE_STYLE] = 0;
 	m_drawAttributeMap[LINE_WIDTH] = 1;
-	m_drawAttributeMap[MARKER_SIZE] = 1.6;
+	m_drawAttributeMap[MARKER_SIZE] = 1.3;
 	m_drawAttributeMap[FILL_COLOR] = 0;
 	m_drawAttributeMap[FILL_STYLE] = 0;
 }
@@ -121,7 +121,7 @@ float DrawAttributeMapping::GetAttribute(DrawAttribute attribute) const
 
 //--------------------------------------------------------------------------------------------------------------------
 
-TGraphErrors *DrawAttributeMapping::ConfigureGraph(TGraphErrors *pGraph)
+TGraphAsymmErrors *DrawAttributeMapping::ConfigureGraph(TGraphAsymmErrors *pGraph)
 {
 	if(NULL == pGraph)
 		return NULL;
@@ -229,6 +229,7 @@ void TreeAnalyzer::Loop(int pointID, double xGraph, GraphMap &graphMap)
 	unsigned int nProcessedEvents = 0;
 	float meanNPfos = 0.f;
 	float meanEfficiency = 0.f;
+	float meanNHit = 0.f;
 
 	TH1F *pEnergyDistribution = new TH1F("tmp_histo_single_erec", "", 121, 0, 120);
 
@@ -271,10 +272,17 @@ void TreeAnalyzer::Loop(int pointID, double xGraph, GraphMap &graphMap)
 		if(totalNHit != 0)
 			meanEfficiency += static_cast<float>(chargedNHit) / static_cast<float>(totalNHit);
 
+		meanNHit += chargedNHit;
 	} // end of loop
 
+	meanNHit /= nProcessedEvents;
+	double nHitError = 1 / std::sqrt(nProcessedEvents);
+
 	meanEfficiency /= nProcessedEvents;
+	double efficiencyError = std::sqrt( ( meanEfficiency * (1 - meanEfficiency) ) / nProcessedEvents );
+
 	meanNPfos /= nProcessedEvents;
+	double nPfosError = 1 / std::sqrt(nProcessedEvents);
 
 	TF1 *pGaus = new TF1("gausFunc","gaus", 0, 120);
 	pEnergyDistribution->Fit(pGaus, "NQ", "");
@@ -296,26 +304,28 @@ void TreeAnalyzer::Loop(int pointID, double xGraph, GraphMap &graphMap)
 	// no delete of TF1 since the distribution owns it. Deleted at next delete
 	delete pEnergyDistribution;
 
+	graphMap[N_HIT]->SetPoint(pointID, xGraph, meanNHit);
+	graphMap[N_HIT]->SetPointError(pointID, 0, 0, nHitError, nHitError);
 
 	graphMap[EFFICIENCY]->SetPoint(pointID, xGraph, meanEfficiency);
-	graphMap[EFFICIENCY]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	graphMap[EFFICIENCY]->SetPointError(pointID, 0, 0, efficiencyError, efficiencyError);
 
 	graphMap[E_REC]->SetPoint(pointID, xGraph, meanChargedEnergy);
-	graphMap[E_REC]->SetPointError(pointID, 0, meanChargedEnergyError);
+	graphMap[E_REC]->SetPointError(pointID, 0, 0, meanChargedEnergyError, meanChargedEnergyError);
 
 	graphMap[E_RESOL]->SetPoint(pointID, xGraph, chargedEnergyResolution);
-	graphMap[E_RESOL]->SetPointError(pointID, 0, chargedEnergyResolutionError);
+	graphMap[E_RESOL]->SetPointError(pointID, 0, 0, chargedEnergyResolutionError, chargedEnergyResolutionError);
 
 	graphMap[E_REC_DEVIATION]->SetPoint(pointID, xGraph, chargedEnergyDeviation);
-	graphMap[E_REC_DEVIATION]->SetPointError(pointID, 0, chargedEnergyDeviationError);
+	graphMap[E_REC_DEVIATION]->SetPointError(pointID, 0, 0, chargedEnergyDeviationError, chargedEnergyDeviationError);
 
 	graphMap[N_PFOS]->SetPoint(pointID, xGraph, meanNPfos);
-	graphMap[N_PFOS]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	graphMap[N_PFOS]->SetPointError(pointID, 0, 0, nPfosError, nPfosError);
 }
 
 //--------------------------------------------------------------------------------------------------------------------
 
-void TreeAnalyzer::FillSpecificNPfosGraph(TGraphErrors *pGraphErrors)
+void TreeAnalyzer::FillSpecificNPfosGraph(TGraphAsymmErrors *pGraphErrors)
 {
 	if (m_pTree == 0)
 		return;
@@ -347,7 +357,121 @@ void TreeAnalyzer::FillSpecificNPfosGraph(TGraphErrors *pGraphErrors)
 	for(unsigned int i=0 ; i<nPfosVector.size() ; i++)
 	{
 		pGraphErrors->SetPoint(i, static_cast<double>(i), nPfosVector.at(i) / static_cast<double>(nProcessedEvents));
-		pGraphErrors->SetPointError(i, 0, 0);
+		pGraphErrors->SetPointError(i, 0, 0, 0, 0);
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void TreeAnalyzer::FillSpecificPfoSizeGraph(TGraphAsymmErrors *pGraphErrors)
+{
+	if (m_pTree == 0)
+		return;
+
+	Long64_t nEntries = m_pTree->GetEntriesFast();
+
+	int nDivs = 5;
+	std::vector<double> pfosSizeVector(3000, 0.f);
+	int nProcessedEvents = 0;
+
+	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
+	{
+		Long64_t ientry = this->LoadTree(jentry);
+
+		if (ientry < 0)
+			break;
+
+		m_pTree->GetEntry(jentry);
+
+		for(int p=0 ; p<m_nPfos ; p++)
+		{
+			if(static_cast<int>(pfosSizeVector.size())-1 < m_nHit->at(p))
+			{
+				std::cout << "Too much hit in pfo (" << m_nHit->at(p) << "). Skipping ..." << std::endl;
+				continue;
+			}
+
+			pfosSizeVector.at(m_nHit->at(p))++;
+		}
+
+		nProcessedEvents++;
+	}
+
+	int cumul = 0;
+	int point = 0;
+
+	for(int i=0 ; i<pfosSizeVector.size() ; i++)
+	{
+		if((i+1)%nDivs != 0)
+		{
+			cumul += pfosSizeVector.at(i);
+		}
+		else
+		{
+			pGraphErrors->SetPoint(point, static_cast<double>(i), cumul / static_cast<double>(nProcessedEvents));
+			pGraphErrors->SetPointError(point, 0, 0, 0, 0);
+
+			point++;
+			cumul = 0;
+		}
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void TreeAnalyzer::FillSpecificNHitGraph(TGraphAsymmErrors *pGraphErrors)
+{
+	if (m_pTree == 0)
+		return;
+
+	Long64_t nEntries = m_pTree->GetEntriesFast();
+
+	int nDivs = 5;
+	std::vector<double> nHitVector(3000, 0.f);
+	int nProcessedEvents = 0;
+
+	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
+	{
+		Long64_t ientry = this->LoadTree(jentry);
+
+		if (ientry < 0)
+			break;
+
+		m_pTree->GetEntry(jentry);
+
+		int chargedNHit = 0;
+
+		for(int p=0 ; p<m_nPfos ; p++)
+		{
+			// charged case
+			if(m_charge->at(p) != 0)
+			{
+				chargedNHit += m_nHit->at(p);
+			}
+		}
+
+		nHitVector.at(chargedNHit) ++;
+
+		nProcessedEvents++;
+	}
+
+	int cumul = 0;
+	int point = 0;
+
+	for(int i=0 ; i<nHitVector.size() ; i++)
+	{
+		if((i+1)%nDivs != 0)
+		{
+			cumul += nHitVector.at(i);
+		}
+		else
+		{
+			pGraphErrors->SetPoint(point, static_cast<double>(i), cumul / static_cast<double>(nProcessedEvents));
+			pGraphErrors->SetPointError(point, 0, 0, 0, 0);
+
+			point++;
+			cumul = 0;
+		}
 	}
 }
 
@@ -443,6 +567,13 @@ void SingleAnalysis::SetComputeSystematics(bool compute)
 
 //--------------------------------------------------------------------------------------------------------------------
 
+void SingleAnalysis::SetLabel(const std::string &label)
+{
+	m_label = label;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
 void SingleAnalysis::ConfigureMultiGraphMap()
 {
 	std::cout << "Configuring multi graph map" << std::endl;
@@ -461,6 +592,9 @@ void SingleAnalysis::ConfigureMultiGraphMap()
 	std::cout << "  Creating graphs ..." << std::endl;
 
 	// map each graph name with a canvas and a multi graph
+	m_canvasMultiGraphMap[N_HIT].first = this->CreateCanvas("SingleParticle_NHit", "N recovered hits");
+	m_canvasMultiGraphMap[N_HIT].second = this->CreateMultiGraph();
+
 	m_canvasMultiGraphMap[EFFICIENCY].first = this->CreateCanvas("SingleParticle_Efficiency", "Hit clustering efficiency");
 	m_canvasMultiGraphMap[EFFICIENCY].second = this->CreateMultiGraph();
 
@@ -481,6 +615,18 @@ void SingleAnalysis::ConfigureMultiGraphMap()
 
 	m_canvasMultiGraphMap[N_PFOS_70GEV].first = this->CreateCanvas("SingleParticle_NPfosAt70GeV", "Number of Pfos at 70 GeV");
 	m_canvasMultiGraphMap[N_PFOS_70GEV].second = this->CreateMultiGraph();
+
+	m_canvasMultiGraphMap[PFO_SIZE_20GEV].first = this->CreateCanvas("SingleParticle_PfosSizeAt20GeV", "Size of Pfos at 20 GeV");
+	m_canvasMultiGraphMap[PFO_SIZE_20GEV].second = this->CreateMultiGraph();
+
+	m_canvasMultiGraphMap[PFO_SIZE_70GEV].first = this->CreateCanvas("SingleParticle_PfosSizeAt70GeV", "Size of Pfos at 70 GeV");
+	m_canvasMultiGraphMap[PFO_SIZE_70GEV].second = this->CreateMultiGraph();
+
+	m_canvasMultiGraphMap[N_HIT_20GEV].first = this->CreateCanvas("SingleParticle_NHitAt20GeV", "NHit (ch=1) at 20 GeV");
+	m_canvasMultiGraphMap[N_HIT_20GEV].second = this->CreateMultiGraph();
+
+	m_canvasMultiGraphMap[N_HIT_70GEV].first = this->CreateCanvas("SingleParticle_NHitAt70GeV", "NHit (ch=1) at 70 GeV");
+	m_canvasMultiGraphMap[N_HIT_70GEV].second = this->CreateMultiGraph();
 
 	m_pERecCanvas = new TCanvas("SingleParticle_ERec_and_deviation", "ERec and its deviation", 14, 48, 600, 741);
 	m_pERecCanvas->SetFillColor(0);
@@ -524,13 +670,23 @@ void SingleAnalysis::FillFromTree(DataType dataType)
 	DrawAttributeMapping drawAttributeMapping(dataType);
 
 	GraphMap graphMap;
-	graphMap[EFFICIENCY] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[N_PFOS] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[N_PFOS_20GEV] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[N_PFOS_70GEV] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[N_HIT] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[EFFICIENCY] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[N_PFOS] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[N_PFOS_20GEV] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[N_PFOS_70GEV] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[PFO_SIZE_20GEV] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[PFO_SIZE_20GEV]->SetMarkerSize(1);
+	graphMap[PFO_SIZE_70GEV] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[PFO_SIZE_70GEV]->SetMarkerSize(1);
+	graphMap[N_HIT_20GEV] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[N_HIT_20GEV]->SetMarkerSize(1);
+	graphMap[N_HIT_70GEV] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[N_HIT_70GEV]->SetMarkerSize(1);
+
 
 	int pointID = 0;
 
@@ -561,10 +717,14 @@ void SingleAnalysis::FillFromTree(DataType dataType)
 		if(energy == 20)
 		{
 			treeAnalyzer.FillSpecificNPfosGraph(graphMap[N_PFOS_20GEV]);
+			treeAnalyzer.FillSpecificPfoSizeGraph(graphMap[PFO_SIZE_20GEV]);
+			treeAnalyzer.FillSpecificNHitGraph(graphMap[N_HIT_20GEV]);
 		}
 		else if(energy == 70)
 		{
 			treeAnalyzer.FillSpecificNPfosGraph(graphMap[N_PFOS_70GEV]);
+			treeAnalyzer.FillSpecificPfoSizeGraph(graphMap[PFO_SIZE_70GEV]);
+			treeAnalyzer.FillSpecificNHitGraph(graphMap[N_HIT_70GEV]);
 		}
 
 		// compute systematic errors if required !
@@ -587,9 +747,9 @@ void SingleAnalysis::FillFromFile(DataType dataType)
 	DrawAttributeMapping drawAttributeMapping(dataType);
 	GraphMap graphMap;
 
-	graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-	graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+	graphMap[E_REC] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[E_REC_DEVIATION] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
+	graphMap[E_RESOL] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors());
 
 	int pointID = 0;
 
@@ -629,13 +789,13 @@ void SingleAnalysis::FillFromFile(DataType dataType)
 		erecDevError = erecError / energy;
 
 		graphMap[E_REC]->SetPoint(e, energy, erec);
-		graphMap[E_REC]->SetPointError(e, 0, erecError);
+		graphMap[E_REC]->SetPointError(e, 0, 0, erecError, erecError);
 
 		graphMap[E_REC_DEVIATION]->SetPoint(e, energy, erecDev);
-		graphMap[E_REC_DEVIATION]->SetPointError(e, 0, erecDevError);
+		graphMap[E_REC_DEVIATION]->SetPointError(e, 0, 0, erecDevError, erecDevError);
 
 		graphMap[E_RESOL]->SetPoint(e, energy, eresol);
-		graphMap[E_RESOL]->SetPointError(e, 0, eresolError);
+		graphMap[E_RESOL]->SetPointError(e, 0, 0, eresolError, eresolError);
 	}
 
 	// Add graphs in multi graph map
@@ -667,12 +827,14 @@ void SingleAnalysis::ComputeSystematics(int pointID, int energy, DataType dataTy
 	GraphSystErrorMap upperErrorMap;
 	GraphSystErrorMap lowerErrorMap;
 
+	upperErrorMap[N_HIT] = 0.d;
 	upperErrorMap[EFFICIENCY] = 0.d;
 	upperErrorMap[E_REC] = 0.d;
 	upperErrorMap[E_REC_DEVIATION] = 0.d;
 	upperErrorMap[E_RESOL] = 0.d;
 	upperErrorMap[N_PFOS] = 0.d;
 
+	lowerErrorMap[N_HIT] = 0.d;
 	lowerErrorMap[EFFICIENCY] = 0.d;
 	lowerErrorMap[E_REC] = 0.d;
 	lowerErrorMap[E_REC_DEVIATION] = 0.d;
@@ -718,14 +880,18 @@ void SingleAnalysis::ComputeSystematics(int pointID, int energy, DataType dataTy
 			}
 
 			GraphMap graphMap;
-			graphMap[EFFICIENCY] = new TGraphErrors();
-			graphMap[E_REC] = new TGraphErrors();
-			graphMap[E_REC_DEVIATION] = new TGraphErrors();
-			graphMap[E_RESOL] = new TGraphErrors();
-			graphMap[N_PFOS] = new TGraphErrors();
+			graphMap[N_HIT] = new TGraphAsymmErrors();
+			graphMap[EFFICIENCY] = new TGraphAsymmErrors();
+			graphMap[E_REC] = new TGraphAsymmErrors();
+			graphMap[E_REC_DEVIATION] = new TGraphAsymmErrors();
+			graphMap[E_RESOL] = new TGraphAsymmErrors();
+			graphMap[N_PFOS] = new TGraphAsymmErrors();
 
 			TreeAnalyzer treeAnalyzer(pTree);
 			treeAnalyzer.Loop(pointID, static_cast<double>(energy), graphMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					N_HIT, upperErrorMap, lowerErrorMap);
 
 			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
 					EFFICIENCY, upperErrorMap, lowerErrorMap);
@@ -746,26 +912,110 @@ void SingleAnalysis::ComputeSystematics(int pointID, int energy, DataType dataTy
 
 	delete pFileList;
 
-	// First try : combine upper and lower values for efficiency
-	graphMapAtNominalValues[EFFICIENCY]->SetPointError(pointID, 0,
-			graphMapAtNominalValues[EFFICIENCY]->GetEY()[pointID]
-		+ std::sqrt( upperErrorMap[EFFICIENCY] + lowerErrorMap[EFFICIENCY] ) );
+	double upperError = 0;
+	double lowerError = 0;
 
-	graphMapAtNominalValues[E_REC]->SetPointError(pointID, 0,
-			graphMapAtNominalValues[E_REC]->GetEY()[pointID]
-		+ std::sqrt( upperErrorMap[E_REC] + lowerErrorMap[E_REC] ) );
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_HIT]->GetEYhigh()[pointID]*graphMapAtNominalValues[N_HIT]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[N_HIT]
+				);
 
-	graphMapAtNominalValues[E_REC_DEVIATION]->SetPointError(pointID, 0,
-			graphMapAtNominalValues[E_REC_DEVIATION]->GetEY()[pointID]
-		+ std::sqrt( upperErrorMap[E_REC_DEVIATION] + lowerErrorMap[E_REC_DEVIATION] ) );
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_HIT]->GetEYhigh()[pointID]*graphMapAtNominalValues[N_HIT]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[N_HIT]
+				);
 
-	graphMapAtNominalValues[E_RESOL]->SetPointError(pointID, 0,
-			graphMapAtNominalValues[E_RESOL]->GetEY()[pointID]
-		+ std::sqrt( upperErrorMap[E_RESOL] + lowerErrorMap[E_RESOL] ) );
+	graphMapAtNominalValues[N_HIT]->SetPointError(pointID, 0, 0, lowerError, upperError);
 
-	graphMapAtNominalValues[N_PFOS]->SetPointError(pointID, 0,
-			graphMapAtNominalValues[N_PFOS]->GetEY()[pointID]
-		+ std::sqrt( upperErrorMap[N_PFOS] + lowerErrorMap[N_PFOS] ) );
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[EFFICIENCY]->GetEYhigh()[pointID]*graphMapAtNominalValues[EFFICIENCY]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[EFFICIENCY]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[EFFICIENCY]->GetEYhigh()[pointID]*graphMapAtNominalValues[EFFICIENCY]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[EFFICIENCY]
+				);
+
+	graphMapAtNominalValues[EFFICIENCY]->SetPointError(pointID, 0, 0, lowerError, upperError);
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[E_REC]->GetEYhigh()[pointID]*graphMapAtNominalValues[E_REC]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[E_REC]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[E_REC]->GetEYhigh()[pointID]*graphMapAtNominalValues[E_REC]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[E_REC]
+				);
+
+	graphMapAtNominalValues[E_REC]->SetPointError(pointID, 0, 0, lowerError, upperError);
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[E_REC_DEVIATION]->GetEYhigh()[pointID]*graphMapAtNominalValues[E_REC_DEVIATION]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[E_REC_DEVIATION]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[E_REC_DEVIATION]->GetEYhigh()[pointID]*graphMapAtNominalValues[E_REC_DEVIATION]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[E_REC_DEVIATION]
+				);
+
+	graphMapAtNominalValues[E_REC_DEVIATION]->SetPointError(pointID, 0, 0, lowerError, upperError);
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[E_RESOL]->GetEYhigh()[pointID]*graphMapAtNominalValues[E_RESOL]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[E_RESOL]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[E_RESOL]->GetEYhigh()[pointID]*graphMapAtNominalValues[E_RESOL]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[E_RESOL]
+				);
+
+	graphMapAtNominalValues[E_RESOL]->SetPointError(pointID, 0, 0, lowerError, upperError);
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID]*graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[N_PFOS]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID]*graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[N_PFOS]
+				);
+
+	graphMapAtNominalValues[N_PFOS]->SetPointError(pointID, 0, 0, lowerError, upperError);
 }
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -818,6 +1068,16 @@ void SingleAnalysis::DrawGraphs()
 	m_canvasMultiGraphMap[E_REC].second->Draw("ap");
 	this->PostDrawMultiGraph(E_REC, m_canvasMultiGraphMap[E_REC].second);
 
+	TPaveText *pBLabel = new TPaveText(0.8, 0.2, 0.85, 0.25, "tbNDC");
+	pBLabel->SetTextSize(0.05);
+	pBLabel->SetTextColor(kBlack);
+	pBLabel->SetFillColor(0);
+	pBLabel->SetLineWidth(0);
+	pBLabel->SetBorderSize(0);
+	pBLabel->AddText("b)");
+	pBLabel->SetTextFont(62);
+	pBLabel->Draw();
+
 	TLegend *pLegend = pERecPad->BuildLegend();
 	pLegend->SetBorderSize(0);
 	pLegend->SetLineColor(0);
@@ -857,6 +1117,16 @@ void SingleAnalysis::DrawGraphs()
 
 	this->PostDrawMultiGraph(E_REC_DEVIATION, m_canvasMultiGraphMap[E_REC_DEVIATION].second);
 
+	TPaveText *pALabel = new TPaveText(0.8, 0.8, 0.85, 0.85, "tbNDC");
+	pALabel->SetTextSize(0.09);
+	pALabel->SetTextColor(kBlack);
+	pALabel->SetFillColor(0);
+	pALabel->SetLineWidth(0);
+	pALabel->SetBorderSize(0);
+	pALabel->AddText("a)");
+	pALabel->SetTextFont(62);
+	pALabel->Draw();
+
 	pERecDeviationPad->Modified();
 
 	for(CanvasMultiGraphMap::iterator graphIter = m_canvasMultiGraphMap.begin(), graphEndIter = m_canvasMultiGraphMap.end() ;
@@ -867,8 +1137,10 @@ void SingleAnalysis::DrawGraphs()
 
 		graphIter->second.first->cd();
 
+//		if(graphIter->first == PFO_SIZE_20GEV)
+//			graphIter->second.second->Draw("AB");
+//		else
 		graphIter->second.second->Draw("ap");
-		this->PostDrawMultiGraph(graphIter->first, graphIter->second.second);
 
 		TLegend *pLegend = graphIter->second.first->BuildLegend();
 		pLegend->SetBorderSize(0);
@@ -878,6 +1150,8 @@ void SingleAnalysis::DrawGraphs()
 		pLegend->SetFillColor(0);
 		pLegend->SetFillStyle(0);
 		pLegend->SetTextSize(0.04);
+
+		this->PostDrawMultiGraph(graphIter->first, graphIter->second.second);
 	}
 }
 
@@ -1055,6 +1329,60 @@ void SingleAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMulti
 		pMultiGraph->GetYaxis()->SetLabelSize(0.07);
 		break;
 	}
+	case N_PFOS_20GEV:
+	case N_PFOS_70GEV:
+	{
+		pMultiGraph->GetXaxis()->SetTitle("<N_{pfos}>");
+		pMultiGraph->GetXaxis()->SetLabelFont(42);
+		pMultiGraph->GetXaxis()->SetTitleSize(0.05);
+		pMultiGraph->GetXaxis()->SetTitleOffset(1.);
+		pMultiGraph->GetXaxis()->SetTitleFont(42);
+		pMultiGraph->GetXaxis()->SetRangeUser(0, 90);
+
+		pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+		pMultiGraph->GetYaxis()->SetLabelFont(42);
+		pMultiGraph->GetYaxis()->SetTitleSize(0.045);
+		pMultiGraph->GetYaxis()->SetTitleOffset(1.3);
+		pMultiGraph->GetYaxis()->SetTitleFont(42);
+		pMultiGraph->GetYaxis()->SetLabelSize(0.035);
+		break;
+	}
+	case PFO_SIZE_20GEV:
+	case PFO_SIZE_70GEV:
+	{
+		pMultiGraph->GetXaxis()->SetTitle("NHit_{pfos}");
+		pMultiGraph->GetXaxis()->SetLabelFont(42);
+		pMultiGraph->GetXaxis()->SetTitleSize(0.05);
+		pMultiGraph->GetXaxis()->SetTitleOffset(1.);
+		pMultiGraph->GetXaxis()->SetTitleFont(42);
+		pMultiGraph->GetXaxis()->SetRangeUser(0, 90);
+
+		pMultiGraph->GetYaxis()->SetTitle("# events");
+		pMultiGraph->GetYaxis()->SetLabelFont(42);
+		pMultiGraph->GetYaxis()->SetTitleSize(0.045);
+		pMultiGraph->GetYaxis()->SetTitleOffset(1.3);
+		pMultiGraph->GetYaxis()->SetTitleFont(42);
+		pMultiGraph->GetYaxis()->SetLabelSize(0.035);
+		break;
+	}
+	case N_HIT_20GEV:
+	case N_HIT_70GEV:
+	{
+		pMultiGraph->GetXaxis()->SetTitle("NHit");
+		pMultiGraph->GetXaxis()->SetLabelFont(42);
+		pMultiGraph->GetXaxis()->SetTitleSize(0.05);
+		pMultiGraph->GetXaxis()->SetTitleOffset(1.);
+		pMultiGraph->GetXaxis()->SetTitleFont(42);
+		pMultiGraph->GetXaxis()->SetRangeUser(0, 90);
+
+		pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+		pMultiGraph->GetYaxis()->SetLabelFont(42);
+		pMultiGraph->GetYaxis()->SetTitleSize(0.045);
+		pMultiGraph->GetYaxis()->SetTitleOffset(1.3);
+		pMultiGraph->GetYaxis()->SetTitleFont(42);
+		pMultiGraph->GetYaxis()->SetLabelSize(0.035);
+		break;
+	}
 	default:
 	{
 		pMultiGraph->GetXaxis()->SetTitle("E_{beam} [GeV]");
@@ -1076,24 +1404,34 @@ void SingleAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMulti
 
 	if(graphName != E_REC_DEVIATION)
 	{
-		TPaveText *pt = new TPaveText(0.3, 0.2, 0.53, 0.3, "tbNDC");
-		pt->SetTextSize(0.05);
-		pt->SetTextColor(kGray+2);
-		pt->SetFillColor(0);
-		pt->SetLineWidth(0);
-		pt->SetBorderSize(0);
-		pt->AddText("CALICE SDHCAL");
-		pt->SetTextFont(62);
-		pt->Draw();
+		if( ! m_label.empty() )
+		{
+			TPaveText *pt = new TPaveText(0.3, 0.2, 0.53, 0.3, "tbNDC");
+			pt->SetTextSize(0.05);
+			pt->SetTextColor(kGray+2);
+			pt->SetFillColor(0);
+			pt->SetLineWidth(0);
+			pt->SetBorderSize(0);
+			pt->AddText(m_label.c_str());
+			pt->SetTextFont(62);
+			pt->Draw();
+		}
 	}
 
 	// plot per plot customize
 	switch(graphName)
 	{
 	case E_REC:
-		pMultiGraph->GetYaxis()->SetTitle("E_{rec}");
+	{
+		pMultiGraph->GetYaxis()->SetTitle("E_{rec} [GeV]");
 		pMultiGraph->GetYaxis()->SetRangeUser(1, 90);
+		TF1 *pLine = new TF1("line","x", 0, 90);
+		pLine->SetLineColor(kBlack);
+		pLine->SetLineWidth(1);
+		pLine->SetLineStyle(2);
+		pLine->Draw("same");
 		break;
+	}
 	case E_REC_DEVIATION:
 		pMultiGraph->GetYaxis()->SetTitle("#DeltaE/E_{beam}");
 		pMultiGraph->GetYaxis()->SetRangeUser(-0.12, 0.12);
@@ -1112,9 +1450,23 @@ void SingleAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMulti
 		pMultiGraph->GetYaxis()->SetRangeUser(0, 1);
 		pMultiGraph->GetXaxis()->SetRangeUser(-0.99, 5.99);
 		break;
+	case PFO_SIZE_20GEV:
+	case PFO_SIZE_70GEV:
+		pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+		pMultiGraph->GetXaxis()->SetRangeUser(0, 1800);
+		break;
+	case N_HIT_20GEV:
+	case N_HIT_70GEV:
+		pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+		pMultiGraph->GetXaxis()->SetRangeUser(0, 1800);
+		break;
 	case EFFICIENCY:
 		pMultiGraph->GetYaxis()->SetTitle("Hit clustering efficiency #epsilon_{s}");
 		pMultiGraph->GetYaxis()->SetRangeUser(0.8, 1.1);
+		break;
+	case N_HIT:
+		pMultiGraph->GetYaxis()->SetTitle("N_{hit} recovered");
+		pMultiGraph->GetYaxis()->SetRangeUser(0, 1300);
 		break;
 	default:
 		break;

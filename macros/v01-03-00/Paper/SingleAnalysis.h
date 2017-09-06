@@ -4,7 +4,7 @@
 // -- root headers
 #include <TChain.h>
 #include <TFile.h>
-#include <TGraphErrors.h>
+#include <TGraphAsymmErrors.h>
 #include <TCanvas.h>
 #include <TGraph.h>
 #include <TMultiGraph.h>
@@ -54,13 +54,18 @@ enum DataType
  */
 enum GraphName
 {
+	N_HIT,
 	EFFICIENCY,
 	E_REC,
 	E_REC_DEVIATION,
 	E_RESOL,
 	N_PFOS,
 	N_PFOS_20GEV,
-	N_PFOS_70GEV
+	N_PFOS_70GEV,
+	PFO_SIZE_20GEV,
+	PFO_SIZE_70GEV,
+	N_HIT_20GEV,
+	N_HIT_70GEV
 };
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -91,7 +96,7 @@ std::string DataTypeToDrawableString(DataType dataType);
 
 //--------------------------------------------------------------------------------------------------------------------
 
-typedef std::map<GraphName, TGraphErrors *> GraphMap;
+typedef std::map<GraphName, TGraphAsymmErrors *> GraphMap;
 typedef std::map<GraphName, double> GraphSystErrorMap;
 typedef std::map<DrawAttribute, float> DrawAttributeMap;
 typedef std::pair<TCanvas*, TMultiGraph*> CanvasMultiGraphPair;
@@ -124,7 +129,7 @@ public:
 	/**
 	 *  @brief  Configure the graph
 	 */
-	TGraphErrors *ConfigureGraph(TGraphErrors *pGraph);
+	TGraphAsymmErrors *ConfigureGraph(TGraphAsymmErrors *pGraph);
 
 private:
 	DrawAttributeMap    m_drawAttributeMap;
@@ -175,7 +180,17 @@ public:
 	/**
 	 *  @brief  Fill the graph with the distribution of number of pfos
 	 */
-	void FillSpecificNPfosGraph(TGraphErrors *pGraphErrors);
+	void FillSpecificNPfosGraph(TGraphAsymmErrors *pGraphErrors);
+
+	/**
+	 *  @brief  Fill the graph with the distribution of size of pfos
+	 */
+	void FillSpecificPfoSizeGraph(TGraphAsymmErrors *pGraphErrors);
+
+	/**
+	 *  @brief  Fill the graph with the distribution of number of hits for the charged pfo
+	 */
+	void FillSpecificNHitGraph(TGraphAsymmErrors *pGraphErrors);
 
 private:
 
@@ -270,6 +285,11 @@ public:
 	 */
 	void SetComputeSystematics(bool compute = true);
 
+	/**
+	 *  @brief  Set the label to be drawn
+	 */
+	void SetLabel(const std::string &label = "CALICE SDHCAL");
+
 private:
 	/**
 	 *  @brief  Configure all graphs before filling them (allocation + customize)
@@ -363,6 +383,7 @@ private:
 	bool                         m_computeSystematics;
 	std::string                  m_rootFileDirectory;
 	std::string                  m_treeName;
+	std::string                  m_label;
 };
 
 

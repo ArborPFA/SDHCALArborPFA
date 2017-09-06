@@ -6,6 +6,7 @@
 #include <TCanvas.h>
 #include <TPaveText.h>
 #include <TLegend.h>
+#include <TSystemDirectory.h>
 
 // -- std headers
 #include <iostream>
@@ -31,6 +32,108 @@ std::string DataTypeToDrawableString(DataType dataType)
 }
 
 //--------------------------------------------------------------------------------------------------------------------
+
+std::string GetDataName(DataType dataType)
+{
+	switch(dataType)
+	{
+		case TB_SPS_AUG_2012:
+			return "TEST_BEAM";
+		case FTFP_BERT_HP:
+			return "FTFP_BERT_HP";
+		case FTF_BIC:
+			return "FTF_BIC";
+		default:
+			return "UNKNOWN";
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+std::string GetFileName(int neutralEnergy, int chargedEnergy, unsigned int distance, DataType dataType)
+{
+	std::stringstream distanceStr;
+	distanceStr << distance;
+
+	std::string fileName =
+			"OverlayEventReconstruction_"
+		  + GetEnergyToString(dataType, neutralEnergy)
+		  + "_neutral_"
+		  + GetEnergyToString(dataType, chargedEnergy)
+		  + "_charged_"
+		  + distanceStr.str()
+		  + "cm_cut_ArborPFA_"
+		  + GetDataName(dataType)
+		  + "_basic.root";
+
+	return fileName;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+std::string GetEnergyToString(DataType dataType, int energy)
+{
+	if(FTFP_BERT_HP == dataType || FTF_BIC == dataType)
+	{
+		std::stringstream ss;
+		ss << energy <<"GeV";
+		return ss.str();
+	}
+	else
+	{
+		switch (energy)
+		{
+		 case 10:
+		 	return "715693";
+		 case 20:
+		 	return "715675";
+		 case 30:
+		 	return "715747";
+		 case 40:
+		 	return "715748";
+		 case 50:
+		 	return "715751";
+		 case 60:
+		 	return "715753";
+		 case 70:
+		 	return "715754";
+		 case 80:
+		 	return "715756";
+		 default:
+		 	throw std::invalid_argument("Invalid energy");
+		}
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+TCanvas *CreateCanvas(const std::string &canvasName, const std::string &canvasTitle)
+{
+	TCanvas *pCanvas = new TCanvas(canvasName.c_str(), canvasTitle.c_str(), 200, 52, 700, 650);
+
+	pCanvas->SetFillColor(0);
+	pCanvas->SetBorderMode(0);
+	pCanvas->SetBorderSize(2);
+	pCanvas->SetTickx(1);
+	pCanvas->SetTicky(1);
+	pCanvas->SetLeftMargin(0.15);
+	pCanvas->SetRightMargin(0.03);
+	pCanvas->SetTopMargin(0.05);
+	pCanvas->SetBottomMargin(0.14);
+	pCanvas->SetFrameBorderMode(0);
+	pCanvas->SetFrameBorderMode(0);
+
+	return pCanvas;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+TMultiGraph *CreateMultiGraph()
+{
+	return new TMultiGraph();
+}
+
+//--------------------------------------------------------------------------------------------------------------------
 //--------------------------------------------------------------------------------------------------------------------
 
 DrawAttributeMapping::DrawAttributeMapping(DataType dataType) :
@@ -42,20 +145,23 @@ DrawAttributeMapping::DrawAttributeMapping(DataType dataType) :
 			m_drawAttributeMap[MARKER_COLOR] = kRed;
 			m_drawAttributeMap[MARKER_STYLE] = 23;
 			m_drawAttributeMap[LINE_COLOR] = kRed;
+			m_drawAttributeMap[LINE_STYLE] = 1;
 			break;
 		case FTF_BIC:
 			m_drawAttributeMap[MARKER_STYLE] = 29;
 			m_drawAttributeMap[MARKER_COLOR] = kBlue;
 			m_drawAttributeMap[LINE_COLOR] = kBlue;
+			m_drawAttributeMap[LINE_STYLE] = 1;
 			break;
 		default:
 			m_drawAttributeMap[MARKER_STYLE] = 21;
 			m_drawAttributeMap[MARKER_COLOR] = kBlack;
 			m_drawAttributeMap[LINE_COLOR] = kBlack;
+			m_drawAttributeMap[LINE_STYLE] = 7;
+			break;
 	}
 
-	m_drawAttributeMap[LINE_STYLE] = 0;
-	m_drawAttributeMap[LINE_WIDTH] = 1;
+	m_drawAttributeMap[LINE_WIDTH] = 2;
 	m_drawAttributeMap[MARKER_SIZE] = 1.6;
 	m_drawAttributeMap[FILL_COLOR] = 0;
 	m_drawAttributeMap[FILL_STYLE] = 0;
@@ -75,18 +181,23 @@ float DrawAttributeMapping::GetAttribute(DrawAttribute attribute) const
 
 //--------------------------------------------------------------------------------------------------------------------
 
-TGraphErrors *DrawAttributeMapping::ConfigureGraph(TGraphErrors *pGraph)
+TGraphAsymmErrors *DrawAttributeMapping::ConfigureGraph(TGraphAsymmErrors *pGraph, int chargedEnergy)
 {
 	if(NULL == pGraph)
 		return NULL;
 
-	pGraph->SetName(DataTypeToDrawableString(m_dataType).c_str());
+	// charged energy is a multiple of 10
+	int chID = chargedEnergy/10;
+
+	std::stringstream ss;
+	ss << DataTypeToDrawableString(m_dataType) << " - charged energy " << chargedEnergy << " GeV";
+	pGraph->SetName(ss.str().c_str());
 
 	pGraph->SetMarkerStyle(this->GetAttribute(MARKER_STYLE));
 	pGraph->SetMarkerColor(this->GetAttribute(MARKER_COLOR));
 	pGraph->SetMarkerSize(this->GetAttribute(MARKER_SIZE));
 	pGraph->SetLineColor(this->GetAttribute(LINE_COLOR));
-	pGraph->SetLineStyle(this->GetAttribute(LINE_STYLE));
+	pGraph->SetLineStyle(1);
 	pGraph->SetLineWidth(this->GetAttribute(LINE_WIDTH));
 	pGraph->SetFillColor(this->GetAttribute(FILL_COLOR));
 	pGraph->SetFillStyle(this->GetAttribute(FILL_STYLE));
@@ -196,6 +307,7 @@ void TreeAnalyzer::Loop(int pointID, double xGraph, GraphMap &graphMap)
 	float meanNeutralPurity = 0.f;
 	float meanNeutralEfficiency = 0.f;
 	float meanEnergyDifferenceEfficient = 0.f;
+	float meanEnergyDifference = 0.f;
 
 	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
 	{
@@ -254,23 +366,174 @@ void TreeAnalyzer::Loop(int pointID, double xGraph, GraphMap &graphMap)
 		{
 			meanEnergyDifferenceEfficient += m_neutralEnergy - m_mcParticleEnergy1;
 		}
+
+		meanEnergyDifference += m_neutralEnergy - m_mcParticleEnergy1;
 	} // end of loop
 
+	meanNPfos /= nProcessedEvents;
+	meanNeutralPurity /= nProcessedEvents;
+	meanNeutralEfficiency /= nProcessedEvents;
+	neutralRecPercentage /= nProcessedEvents;
+	meanEnergyDifferenceEfficient /= nProcessedEvents;
+	meanEnergyDifference /= nProcessedEvents;
 
-	graphMap[N_PFOS]->SetPoint(pointID, xGraph, meanNPfos / nProcessedEvents);
-	graphMap[N_PFOS]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	double nPfosError = 1 / std::sqrt(nProcessedEvents);
+	double efficiencyError = std::sqrt( meanNeutralEfficiency*(1-meanNeutralEfficiency) / nProcessedEvents );
+	double purityError = std::sqrt( meanNeutralPurity*(1-meanNeutralPurity) / nProcessedEvents );
+	double neutralProbaError = std::sqrt( neutralRecPercentage*(1-neutralRecPercentage) / nProcessedEvents );
+	double energyDifferenceError = 1 / std::sqrt(nProcessedEvents);
 
-	graphMap[NEUTRAL_PURITY]->SetPoint(pointID, xGraph, meanNeutralPurity / nProcessedEvents);
-	graphMap[NEUTRAL_PURITY]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	graphMap[N_PFOS]->SetPoint(pointID, xGraph, meanNPfos);
+	graphMap[N_PFOS]->SetPointError(pointID, 0, 0, nPfosError, nPfosError);
 
-	graphMap[NEUTRAL_EFFICIENCY]->SetPoint(pointID, xGraph, meanNeutralEfficiency / nProcessedEvents);
-	graphMap[NEUTRAL_EFFICIENCY]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	graphMap[NEUTRAL_PURITY]->SetPoint(pointID, xGraph, meanNeutralPurity);
+	graphMap[NEUTRAL_PURITY]->SetPointError(pointID, 0, 0, purityError, purityError);
 
-	graphMap[NEUTRAL_RECOVER_PROBA]->SetPoint(pointID, xGraph, neutralRecPercentage / nProcessedEvents);
-	graphMap[NEUTRAL_RECOVER_PROBA]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	graphMap[NEUTRAL_EFFICIENCY]->SetPoint(pointID, xGraph, meanNeutralEfficiency);
+	graphMap[NEUTRAL_EFFICIENCY]->SetPointError(pointID, 0, 0, efficiencyError, efficiencyError);
 
-	graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->SetPoint(pointID, xGraph, meanEnergyDifferenceEfficient / nProcessedEvents);
-	graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->SetPointError(pointID, 0, 1 / std::sqrt(nProcessedEvents));
+	graphMap[NEUTRAL_RECOVER_PROBA]->SetPoint(pointID, xGraph, neutralRecPercentage);
+	graphMap[NEUTRAL_RECOVER_PROBA]->SetPointError(pointID, 0, 0, neutralProbaError, neutralProbaError);
+
+	graphMap[NEUTRAL_ENERGY_DIFFERENCE]->SetPoint(pointID, xGraph, meanEnergyDifference);
+	graphMap[NEUTRAL_ENERGY_DIFFERENCE]->SetPointError(pointID, 0, 0, energyDifferenceError, energyDifferenceError);
+
+	graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->SetPoint(pointID, xGraph, meanEnergyDifferenceEfficient);
+	graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->SetPointError(pointID, 0, 0, energyDifferenceError, energyDifferenceError);
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void TreeAnalyzer::FillNeutralMCEnergy(TH1 *pHistogram)
+{
+	if (m_pTree == 0)
+		return;
+
+	Long64_t nEntries = m_pTree->GetEntriesFast();
+
+	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
+	{
+		Long64_t ientry = this->LoadTree(jentry);
+
+		if (ientry < 0)
+			break;
+
+		m_pTree->GetEntry(jentry);
+
+		pHistogram->Fill(m_mcParticleEnergy1);
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void TreeAnalyzer::FillChargedMCEnergy(TH1 *pHistogram)
+{
+	if (m_pTree == 0)
+		return;
+
+	Long64_t nEntries = m_pTree->GetEntriesFast();
+
+	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
+	{
+		Long64_t ientry = this->LoadTree(jentry);
+
+		if (ientry < 0)
+			break;
+
+		m_pTree->GetEntry(jentry);
+
+		pHistogram->Fill(m_mcParticleEnergy2);
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void TreeAnalyzer::FillNOverlaidHits(TGraphAsymmErrors *pGraph)
+{
+	if (m_pTree == 0)
+		return;
+
+	Long64_t nEntries = m_pTree->GetEntriesFast();
+
+	unsigned int nProcessedEvents = 0;
+	std::vector<int> nOverlaidHits(200, 0);
+
+	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
+	{
+		Long64_t ientry = this->LoadTree(jentry);
+
+		if (ientry < 0)
+			break;
+
+		m_pTree->GetEntry(jentry);
+
+		unsigned int totalHitType3 = 0;
+
+		// analyze pfos and extract the purity/efficiency
+		for(int p=0 ; p<m_nPfos ; p++)
+		{
+			totalHitType3 += m_lcioFlagType3->at(p);
+		}
+
+		if(totalHitType3 < nOverlaidHits.size())
+			nOverlaidHits.at(totalHitType3)++;
+
+		nProcessedEvents++;
+	}
+
+	for(unsigned int i=0 ; i<nOverlaidHits.size() ; i++)
+	{
+		pGraph->SetPoint(i, i, nOverlaidHits.at(i) / static_cast<double>(nProcessedEvents));
+		pGraph->SetPointError(i, 0, 0, 0, 0);
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void TreeAnalyzer::FillOverlaidHitsPercentage(TGraphAsymmErrors *pGraph)
+{
+	if (m_pTree == 0)
+		return;
+
+	Long64_t nEntries = m_pTree->GetEntriesFast();
+
+	unsigned int nProcessedEvents = 0;
+	std::vector<int> overlaidHitsPercentage(100, 0);
+
+	for (Long64_t jentry=0 ; jentry<nEntries ; jentry++)
+	{
+		Long64_t ientry = this->LoadTree(jentry);
+
+		if (ientry < 0)
+			break;
+
+		m_pTree->GetEntry(jentry);
+
+		unsigned int nHits = 0;
+		unsigned int totalHitType3 = 0;
+
+		// analyze pfos and extract the purity/efficiency
+		for(int p=0 ; p<m_nPfos ; p++)
+		{
+			nHits += m_nHit->at(p);
+			totalHitType3 += m_lcioFlagType3->at(p);
+		}
+
+		int percentage = round((static_cast<double>(totalHitType3) / nHits)*100);
+
+		std::cout << "nHits : " << nHits << std::endl;
+		std::cout << "totalHitType3 : " << totalHitType3 << std::endl;
+		std::cout << "percentage : " << percentage << std::endl;
+
+		overlaidHitsPercentage.at(percentage) ++;
+		nProcessedEvents++;
+	}
+
+	for(unsigned int i=0 ; i<overlaidHitsPercentage.size() ; i++)
+	{
+		pGraph->SetPoint(i, i, overlaidHitsPercentage.at(i) / static_cast<double>(nProcessedEvents));
+		pGraph->SetPointError(i, 0, 0, 0, 0);
+	}
 }
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -302,7 +565,8 @@ OverlayAnalysis::OverlayAnalysis(int neutralEnergy, int chargedEnergy) :
 		m_rootFileDirectory("/home/remi/soft/SDHCALArborPFA/output/v01-04-00/Separation/"),
 		m_treeName("PfoMonitoring"),
 		m_neutralEnergies(1, neutralEnergy),
-		m_chargedEnergies(1, chargedEnergy)
+		m_chargedEnergies(1, chargedEnergy),
+		m_textLabel("CALICE SDHCAL")
 {
 	m_dataTypeVector.push_back(TB_SPS_AUG_2012);
 	m_dataTypeVector.push_back(FTFP_BERT_HP);
@@ -319,7 +583,8 @@ OverlayAnalysis::OverlayAnalysis(const IntVector &neutralEnergies, const IntVect
 		m_rootFileDirectory("/home/remi/soft/SDHCALArborPFA/output/v01-04-00/Separation/"),
 		m_treeName("PfoMonitoring"),
 		m_neutralEnergies(neutralEnergies),
-		m_chargedEnergies(chargedEnergies)
+		m_chargedEnergies(chargedEnergies),
+		m_textLabel("CALICE SDHCAL")
 {
 	m_dataTypeVector.push_back(TB_SPS_AUG_2012);
 	m_dataTypeVector.push_back(FTFP_BERT_HP);
@@ -381,6 +646,30 @@ void OverlayAnalysis::SetSaveGraphs(bool save)
 
 //--------------------------------------------------------------------------------------------------------------------
 
+void OverlayAnalysis::SetDataTypes(const DataTypeVector &dataTypes)
+{
+	if(dataTypes.empty())
+		return;
+
+	m_dataTypeVector = dataTypes;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayAnalysis::SetComputeSystematics(bool compute)
+{
+	m_computeSystematics = compute;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayAnalysis::SetTextLabel(const std::string &text)
+{
+	m_textLabel = text;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
 void OverlayAnalysis::ConfigureMultiGraphMap()
 {
 	std::cout << "Configuring multi graph map" << std::endl;
@@ -399,20 +688,29 @@ void OverlayAnalysis::ConfigureMultiGraphMap()
 	std::cout << "  Creating graphs ..." << std::endl;
 
 	// map each graph name with a canvas and a multi graph
-	m_canvasMultiGraphMap[N_PFOS].first = this->CreateCanvas("OverlayEvent_NPfos", "Number of PFOs");
-	m_canvasMultiGraphMap[N_PFOS].second = this->CreateMultiGraph();
+	m_canvasMultiGraphMap[N_PFOS].first = CreateCanvas("OverlayEvent_NPfos", "Number of PFOs");
+	m_canvasMultiGraphMap[N_PFOS].second = CreateMultiGraph();
 
-	m_canvasMultiGraphMap[NEUTRAL_PURITY].first = this->CreateCanvas("OverlayEvent_NeutralPurity", "Neutral particle hit purity");
-	m_canvasMultiGraphMap[NEUTRAL_PURITY].second = this->CreateMultiGraph();
+	m_canvasMultiGraphMap[NEUTRAL_PURITY].first = CreateCanvas("OverlayEvent_NeutralPurity", "Neutral particle hit purity");
+	m_canvasMultiGraphMap[NEUTRAL_PURITY].second = CreateMultiGraph();
 
-	m_canvasMultiGraphMap[NEUTRAL_EFFICIENCY].first = this->CreateCanvas("OverlayEvent_NeutralEfficiency", "Neutral particle hit efficiency");
-	m_canvasMultiGraphMap[NEUTRAL_EFFICIENCY].second = this->CreateMultiGraph();
+	m_canvasMultiGraphMap[NEUTRAL_EFFICIENCY].first = CreateCanvas("OverlayEvent_NeutralEfficiency", "Neutral particle hit efficiency");
+	m_canvasMultiGraphMap[NEUTRAL_EFFICIENCY].second = CreateMultiGraph();
 
-	m_canvasMultiGraphMap[NEUTRAL_RECOVER_PROBA].first = this->CreateCanvas("OverlayEvent_NeutralRecoverProba", "Probability to recover at least one neutral particle");
-	m_canvasMultiGraphMap[NEUTRAL_RECOVER_PROBA].second = this->CreateMultiGraph();
+	m_canvasMultiGraphMap[NEUTRAL_RECOVER_PROBA].first = CreateCanvas("OverlayEvent_NeutralRecoverProba", "Probability to recover at least one neutral particle");
+	m_canvasMultiGraphMap[NEUTRAL_RECOVER_PROBA].second = CreateMultiGraph();
 
-	m_canvasMultiGraphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT].first = this->CreateCanvas("OverlayEvent_NeutralEnergyDiff", "Ebeam - Erec when at least one neutral particle is recovered");
-	m_canvasMultiGraphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT].second = this->CreateMultiGraph();
+	m_canvasMultiGraphMap[NEUTRAL_ENERGY_DIFFERENCE].first = CreateCanvas("OverlayEvent_NeutralEnergyDiff", "Ebeam - Erec when at least one neutral particle is recovered");
+	m_canvasMultiGraphMap[NEUTRAL_ENERGY_DIFFERENCE].second = CreateMultiGraph();
+
+	m_canvasMultiGraphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT].first = CreateCanvas("OverlayEvent_NeutralEnergyDiffEfficient", "Ebeam - Erec when at least one neutral particle is recovered");
+	m_canvasMultiGraphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT].second = CreateMultiGraph();
+
+	m_canvasMultiGraphMap[N_OVERLAID_HITS].first = CreateCanvas("OverlayEvent_NOverlaidHits", "Number of overlaid hits");
+	m_canvasMultiGraphMap[N_OVERLAID_HITS].second = CreateMultiGraph();
+
+	m_canvasMultiGraphMap[OVERLAID_HITS_PERCENTAGE].first = CreateCanvas("OverlayEvent_OverlaidHitsPercentage", "Percentage of overlaid hits");
+	m_canvasMultiGraphMap[OVERLAID_HITS_PERCENTAGE].second = CreateMultiGraph();
 }
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -421,23 +719,21 @@ void OverlayAnalysis::FillGraphs()
 {
 	std::cout << "Filling graphs" << std::endl;
 
+	int color(1);
+
 	for(DataTypeVector::const_iterator dataIter = m_dataTypeVector.begin(), dataEndIter = m_dataTypeVector.end() ;
 			dataEndIter != dataIter ; ++dataIter)
 	{
 		DataType dataType = *dataIter;
 		DrawAttributeMapping drawAttributeMapping(dataType);
 
-		GraphMap graphMap;
-		graphMap[N_PFOS] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-		graphMap[NEUTRAL_PURITY] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-		graphMap[NEUTRAL_EFFICIENCY] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-		graphMap[NEUTRAL_RECOVER_PROBA] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
-		graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT] = drawAttributeMapping.ConfigureGraph(new TGraphErrors());
+		std::cout << "Data type = " << dataType << std::endl;
 
 		for(IntVector::iterator nIter = m_neutralEnergies.begin(), nEndIter = m_neutralEnergies.end() ;
 				nEndIter != nIter ; ++nIter)
 		{
 			int neutralEnergy = *nIter;
+			// int color = dataType+1;
 
 			for(IntVector::iterator cIter = m_chargedEnergies.begin(), cEndIter = m_chargedEnergies.end() ;
 					cEndIter != cIter ; ++cIter)
@@ -445,13 +741,21 @@ void OverlayAnalysis::FillGraphs()
 				int chargedEnergy = *cIter;
 				int pointID = 0;
 
+				GraphMap graphMap;
+				graphMap[N_PFOS] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+				graphMap[NEUTRAL_PURITY] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+				graphMap[NEUTRAL_EFFICIENCY] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+				graphMap[NEUTRAL_RECOVER_PROBA] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+				graphMap[NEUTRAL_ENERGY_DIFFERENCE] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+				graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+
 				for(unsigned int distance = m_startDistance ; distance <= m_endDistance ; distance += m_distanceStep)
 				{
 					std::string completeFileName =
 							m_rootFileDirectory
-						  + this->GetDataName(dataType)
+						  + GetDataName(dataType)
 						  + "/"
-						  + this->GetFileName(neutralEnergy, chargedEnergy, distance, dataType);
+						  + GetFileName(neutralEnergy, chargedEnergy, distance, dataType);
 
 					TFile *pFile = TFile::Open(completeFileName.c_str());
 
@@ -466,17 +770,316 @@ void OverlayAnalysis::FillGraphs()
 					TreeAnalyzer treeAnalyzer(pTree);
 					treeAnalyzer.Loop(pointID, static_cast<double>(distance), graphMap);
 
+					if(neutralEnergy == 10 && chargedEnergy == 30 && distance == 30)
+					{
+						graphMap[N_OVERLAID_HITS] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+						graphMap[N_OVERLAID_HITS]->SetLineStyle(0);
+						graphMap[N_OVERLAID_HITS]->SetLineWidth(0);
+						treeAnalyzer.FillNOverlaidHits(graphMap[N_OVERLAID_HITS]);
+
+						graphMap[OVERLAID_HITS_PERCENTAGE] = drawAttributeMapping.ConfigureGraph(new TGraphAsymmErrors(), chargedEnergy);
+						graphMap[OVERLAID_HITS_PERCENTAGE]->SetLineStyle(0);
+						graphMap[OVERLAID_HITS_PERCENTAGE]->SetLineWidth(0);
+						treeAnalyzer.FillOverlaidHitsPercentage(graphMap[OVERLAID_HITS_PERCENTAGE]);
+					}
+
+					// compute systematic errors if required !
+					if( m_computeSystematics )
+						this->ComputeSystematics(pointID, neutralEnergy, chargedEnergy, distance, dataType, graphMap);
+
 					pointID++;
 				}
+
+				// Add graphs in multi graph map
+				for(GraphMap::const_iterator graphIter = graphMap.begin(), graphEndIter = graphMap.end() ;
+						graphEndIter != graphIter ; ++graphIter)
+				{
+					graphIter->second->SetMarkerColor(color);
+					graphIter->second->SetLineColor(color);
+					m_canvasMultiGraphMap[graphIter->first].second->Add(graphIter->second);
+				}
+
+				color ++;
+				// graphColor++;
 			}
 		}
-
-		// Add graphs in multi graph map
-		for(GraphMap::const_iterator graphIter = graphMap.begin(), graphEndIter = graphMap.end() ;
-				graphEndIter != graphIter ; ++graphIter)
-			m_canvasMultiGraphMap[graphIter->first].second->Add(graphIter->second);
-
 	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayAnalysis::ComputeSystematics(int pointID, int neutralEnergy, int chargedEnergy, int distance, DataType dataType, GraphMap &graphMapAtNominalValues)
+{
+	TSystemDirectory directory((m_rootFileDirectory + GetDataName(dataType)
+			+ "/SYSTEMATICS/").c_str(), (m_rootFileDirectory + GetDataName(dataType)
+					+ "/SYSTEMATICS/").c_str());
+	TList *pFileList = directory.GetListOfFiles();
+
+	if( ! pFileList )
+	{
+		std::cout << "No systematics study performed. Directory '" << m_rootFileDirectory + GetDataName(dataType)
+					+ "/SYSTEMATICS/" << "' doesn't exists" << std::endl;
+		return;
+	}
+
+	std::vector<std::string> pm;
+	pm.push_back("+");
+	pm.push_back("-");
+
+	GraphSystErrorMap upperErrorMap;
+	GraphSystErrorMap lowerErrorMap;
+
+	upperErrorMap[N_PFOS] = 0.d;
+	upperErrorMap[NEUTRAL_PURITY] = 0.d;
+	upperErrorMap[NEUTRAL_EFFICIENCY] = 0.d;
+	upperErrorMap[NEUTRAL_RECOVER_PROBA] = 0.d;
+	upperErrorMap[NEUTRAL_ENERGY_DIFFERENCE] = 0.d;
+	upperErrorMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT] = 0.d;
+
+	lowerErrorMap[N_PFOS] = 0.d;
+	lowerErrorMap[NEUTRAL_PURITY] = 0.d;
+	lowerErrorMap[NEUTRAL_EFFICIENCY] = 0.d;
+	lowerErrorMap[NEUTRAL_RECOVER_PROBA] = 0.d;
+	lowerErrorMap[NEUTRAL_ENERGY_DIFFERENCE] = 0.d;
+	lowerErrorMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT] = 0.d;
+
+	for(unsigned int sp=DISTANCE_1 ; sp<N_SYSTEMATIC_PARAMETERS ; sp++)
+	{
+		unsigned int parameterID = sp+1;
+
+		double errorP = 0;
+		double errorM = 0;
+
+		for(unsigned int signID=0 ; signID<pm.size() ; signID++)
+		{
+			std::string sign = pm.at( signID );
+
+			std::stringstream distanceStr;
+			distanceStr << distance;
+
+			TString fileName =
+					"OverlayEventReconstruction_"
+					+ GetEnergyToString(dataType, neutralEnergy)
+					+ "_neutral_"
+					+ GetEnergyToString(dataType, chargedEnergy)
+					+ "_charged_"
+					+ distanceStr.str()
+					+ "cm_cut_ArborPFA_"
+					+ GetDataName(dataType)
+					+ "_P"
+					+ TString::UItoa(parameterID, 10)
+					+ "_S" + sign + "_basic.root";
+
+			TString completeFileName = m_rootFileDirectory + GetDataName(dataType)
+					+ "/SYSTEMATICS/" + fileName;
+
+			TFile *pFile = TFile::Open(completeFileName.Data());
+
+			if( ! pFile )
+			{
+				std::cerr << "Wrong sys file name !" << std::endl;
+				continue;
+			}
+
+			TTree *pTree = (TTree *) pFile->Get(m_treeName.c_str());
+
+			if( ! pTree )
+			{
+				std::cerr << "Wrong sys tree name !" << std::endl;
+				delete pFile;
+				continue;
+			}
+
+			GraphMap graphMap;
+			graphMap[N_PFOS] = new TGraphAsymmErrors();
+			graphMap[NEUTRAL_PURITY] = new TGraphAsymmErrors();
+			graphMap[NEUTRAL_EFFICIENCY] = new TGraphAsymmErrors();
+			graphMap[NEUTRAL_RECOVER_PROBA] = new TGraphAsymmErrors();
+			graphMap[NEUTRAL_ENERGY_DIFFERENCE] = new TGraphAsymmErrors();
+			graphMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT] = new TGraphAsymmErrors();
+
+			TreeAnalyzer treeAnalyzer(pTree);
+			treeAnalyzer.Loop(pointID, static_cast<double>(distance), graphMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					N_PFOS, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					NEUTRAL_PURITY, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					NEUTRAL_EFFICIENCY, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					NEUTRAL_RECOVER_PROBA, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					NEUTRAL_ENERGY_DIFFERENCE, upperErrorMap, lowerErrorMap);
+
+			this->ComputeSystematics(pointID, graphMapAtNominalValues, graphMap,
+					NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT, upperErrorMap, lowerErrorMap);
+
+			double systVar = 0.d;
+			double nominalVar = 0.d;
+			double systVarDiff = 0.d;
+
+			nominalVar = graphMapAtNominalValues.find(NEUTRAL_EFFICIENCY)->second->GetY()[pointID];
+			systVar = graphMap.find(NEUTRAL_EFFICIENCY)->second->GetY()[pointID];
+			systVarDiff = systVar - nominalVar;
+
+			bool print = ( distance == 10 && dataType == TB_SPS_AUG_2012);
+
+			if(print)
+				std::cout << "Error (" << sign << ") for parameter " << sp << " (nom = " << nominalVar << ") is " << systVarDiff << std::endl;;
+
+			if( systVarDiff > 0.d )
+				errorP += systVarDiff*systVarDiff;
+			else
+				errorM += systVarDiff*systVarDiff;
+		}
+	}
+
+	delete pFileList;
+	double upperError = 0;
+	double lowerError = 0;
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID]*graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[N_PFOS]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID]*graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[N_PFOS]
+				);
+
+	graphMapAtNominalValues[N_PFOS]->SetPointError(pointID, 0, 0, lowerError, upperError );
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[N_PFOS]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_PURITY]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[NEUTRAL_PURITY]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_PURITY]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_PURITY]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[NEUTRAL_PURITY]
+				);
+
+	graphMapAtNominalValues[NEUTRAL_PURITY]->SetPointError(pointID, 0, 0, lowerError, upperError );
+
+	bool print = ( distance == 10 && dataType == TB_SPS_AUG_2012);
+
+	if( print )
+	{
+		double systP = std::sqrt(upperErrorMap[NEUTRAL_EFFICIENCY]);
+		double systM = std::sqrt(lowerErrorMap[NEUTRAL_EFFICIENCY]);
+		double stat = graphMapAtNominalValues[NEUTRAL_EFFICIENCY]->GetEYhigh()[pointID];
+		double totalP = std::sqrt( systP*systP + stat*stat );
+		double totalM = std::sqrt( systM*systM + stat*stat );
+
+		std::cout << "systP error = " << systP << std::endl;
+		std::cout << "systM error = " << systM << std::endl;
+		std::cout << "Stat error = " << stat << std::endl;
+		std::cout << "totalP error = " << totalP << endl;
+		std::cout << "totalM error = " << totalM << endl;
+	}
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_EFFICIENCY]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_EFFICIENCY]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[NEUTRAL_EFFICIENCY]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_EFFICIENCY]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_EFFICIENCY]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[NEUTRAL_EFFICIENCY]
+				);
+
+	graphMapAtNominalValues[NEUTRAL_EFFICIENCY]->SetPointError(pointID, 0, 0, lowerError, upperError );
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_RECOVER_PROBA]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_RECOVER_PROBA]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[NEUTRAL_RECOVER_PROBA]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_RECOVER_PROBA]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_RECOVER_PROBA]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[NEUTRAL_RECOVER_PROBA]
+				);
+
+	graphMapAtNominalValues[NEUTRAL_RECOVER_PROBA]->SetPointError(pointID, 0, 0, lowerError, upperError );
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]
+				);
+
+	graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT]->SetPointError(pointID, 0, 0, lowerError, upperError );
+
+	/* -------------------------------------------------- */
+	upperError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				upperErrorMap[NEUTRAL_ENERGY_DIFFERENCE]
+				);
+
+	lowerError = std::sqrt(
+				// squared stat error set before calling this method
+				graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE]->GetEYhigh()[pointID]*graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE]->GetEYhigh()[pointID] +
+				// squared upper syst error that we add now
+				lowerErrorMap[NEUTRAL_ENERGY_DIFFERENCE]
+				);
+
+	graphMapAtNominalValues[NEUTRAL_ENERGY_DIFFERENCE]->SetPointError(pointID, 0, 0, lowerError, upperError );
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayAnalysis::ComputeSystematics(int pointID, const GraphMap &nominalMap, const GraphMap &systGraphMap,
+		GraphName graphName, GraphSystErrorMap &upperBoundErrorMap, GraphSystErrorMap &lowerBoundErrorMap)
+{
+	double systVar = 0.d;
+	double nominalVar = 0.d;
+	double systVarDiff = 0.d;
+
+	nominalVar = nominalMap.find(graphName)->second->GetY()[pointID];
+	systVar = systGraphMap.find(graphName)->second->GetY()[pointID];
+	systVarDiff = systVar - nominalVar;
+
+	if( systVarDiff > 0.d )
+		upperBoundErrorMap[graphName] += systVarDiff*systVarDiff;
+	else
+		lowerBoundErrorMap[graphName] += systVarDiff*systVarDiff;
 }
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -490,7 +1093,12 @@ void OverlayAnalysis::DrawGraphs()
 	{
 		graphIter->second.first->cd();
 
-		graphIter->second.second->Draw("ap");
+		if(graphIter->first != N_OVERLAID_HITS
+				&& graphIter->first != OVERLAID_HITS_PERCENTAGE)
+			graphIter->second.second->Draw("alp");
+		else
+			graphIter->second.second->Draw("ap");
+
 		this->PostDrawMultiGraph(graphIter->first, graphIter->second.second);
 
 		TLegend *pLegend = graphIter->second.first->BuildLegend();
@@ -523,108 +1131,6 @@ void OverlayAnalysis::SaveGraphs()
 
 //--------------------------------------------------------------------------------------------------------------------
 
-std::string OverlayAnalysis::GetDataName(DataType dataType) const
-{
-	switch(dataType)
-	{
-		case TB_SPS_AUG_2012:
-			return "TEST_BEAM";
-		case FTFP_BERT_HP:
-			return "FTFP_BERT_HP";
-		case FTF_BIC:
-			return "FTF_BIC";
-		default:
-			return "UNKNOWN";
-	}
-}
-
-//--------------------------------------------------------------------------------------------------------------------
-
-std::string OverlayAnalysis::GetFileName(int neutralEnergy, int chargedEnergy, unsigned int distance, DataType dataType) const
-{
-	std::stringstream distanceStr;
-	distanceStr << distance;
-
-	std::string fileName =
-			"OverlayEventReconstruction_"
-		  + this->GetEnergyToString(dataType, neutralEnergy)
-		  + "_neutral_"
-		  + this->GetEnergyToString(dataType, chargedEnergy)
-		  + "_charged_"
-		  + distanceStr.str()
-		  + "cm_cut_ArborPFA_"
-		  + this->GetDataName(dataType)
-		  + "_basic.root";
-
-	return fileName;
-}
-
-//--------------------------------------------------------------------------------------------------------------------
-
-std::string OverlayAnalysis::GetEnergyToString(DataType dataType, int energy) const
-{
-	if(FTFP_BERT_HP == dataType || FTF_BIC == dataType)
-	{
-		std::stringstream ss;
-		ss << energy <<"GeV";
-		return ss.str();
-	}
-	else
-	{
-		switch (energy)
-		{
-		 case 10:
-		 	return "715693";
-		 case 20:
-		 	return "715675";
-		 case 30:
-		 	return "715747";
-		 case 40:
-		 	return "715748";
-		 case 50:
-		 	return "715751";
-		 case 60:
-		 	return "715753";
-		 case 70:
-		 	return "715754";
-		 case 80:
-		 	return "715756";
-		 default:
-		 	throw std::invalid_argument("Invalid energy");
-		}
-	}
-}
-
-//--------------------------------------------------------------------------------------------------------------------
-
-TCanvas *OverlayAnalysis::CreateCanvas(const std::string &canvasName, const std::string &canvasTitle) const
-{
-	TCanvas *pCanvas = new TCanvas(canvasName.c_str(), canvasTitle.c_str(), 200, 52, 700, 650);
-
-	pCanvas->SetFillColor(0);
-	pCanvas->SetBorderMode(0);
-	pCanvas->SetBorderSize(2);
-	pCanvas->SetTickx(1);
-	pCanvas->SetTicky(1);
-	pCanvas->SetLeftMargin(0.15);
-	pCanvas->SetRightMargin(0.03);
-	pCanvas->SetTopMargin(0.05);
-	pCanvas->SetBottomMargin(0.14);
-	pCanvas->SetFrameBorderMode(0);
-	pCanvas->SetFrameBorderMode(0);
-
-	return pCanvas;
-}
-
-//--------------------------------------------------------------------------------------------------------------------
-
-TMultiGraph *OverlayAnalysis::CreateMultiGraph() const
-{
-	return new TMultiGraph();
-}
-
-//--------------------------------------------------------------------------------------------------------------------
-
 void OverlayAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMultiGraph) const
 {
 	if(NULL == pMultiGraph)
@@ -645,15 +1151,18 @@ void OverlayAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMult
 	pMultiGraph->GetYaxis()->SetTitleFont(42);
 	pMultiGraph->GetYaxis()->SetLabelSize(0.035);
 
-	TPaveText *pt = new TPaveText(0.3, 0.2, 0.93, 0.3, "tbNDC");
-	pt->SetTextSize(0.05);
-	pt->SetTextColor(kGray+2);
-	pt->SetFillColor(0);
-	pt->SetLineWidth(0);
-	pt->SetBorderSize(0);
-	pt->AddText("CALICE SDHCAL");
-	pt->SetTextFont(62);
-	pt->Draw();
+	if( ! m_textLabel.empty() )
+	{
+		TPaveText *pt = new TPaveText(0.3, 0.2, 0.93, 0.3, "tbNDC");
+		pt->SetTextSize(0.05);
+		pt->SetTextColor(kGray+2);
+		pt->SetFillColor(0);
+		pt->SetLineWidth(0);
+		pt->SetBorderSize(0);
+		pt->AddText( m_textLabel.c_str() );
+		pt->SetTextFont(62);
+		pt->Draw();
+	}
 
 	// plot per plot customize
 	switch(graphName)
@@ -672,30 +1181,263 @@ void OverlayAnalysis::PostDrawMultiGraph(GraphName graphName, TMultiGraph *pMult
 			break;
 		case NEUTRAL_RECOVER_PROBA:
 			pMultiGraph->GetYaxis()->SetTitle("P_{n>0}");
-			pMultiGraph->GetYaxis()->SetRangeUser(0, 1);
+			pMultiGraph->GetYaxis()->SetRangeUser(0, 1.099);
 			break;
+		case NEUTRAL_ENERGY_DIFFERENCE:
+		{
+			pMultiGraph->GetYaxis()->SetTitle("<E_{n,rec} - E_{n,meas}> [GeV]");
+			pMultiGraph->GetYaxis()->SetRangeUser(-10, 10);
+			TF1 *pZero = new TF1("zero1", "0", 0, 35);
+			pZero->SetLineStyle(1);
+			pZero->SetLineColor(kBlack);
+			pZero->SetLineWidth(1);
+			pZero->Draw("same");
+			break;
+		}
 		case NEUTRAL_ENERGY_DIFFERENCE_EFFICIENT:
-			pMultiGraph->GetYaxis()->SetTitle("<E_{n,rec} - E_{n,meas}>, n>0");
-			pMultiGraph->GetYaxis()->SetRangeUser(-5, 5);
+		{
+			pMultiGraph->GetYaxis()->SetTitle("<E_{n,rec} - E_{n,meas}>, n>0 [GeV]");
+			pMultiGraph->GetYaxis()->SetRangeUser(-10, 10);
+			TF1 *pZero = new TF1("zero2", "0", 0, 35);
+			pZero->SetLineStyle(1);
+			pZero->SetLineColor(kBlack);
+			pZero->SetLineWidth(1);
+			pZero->Draw("same");
 			break;
+		}
+		case N_OVERLAID_HITS:
+		{
+			pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+			pMultiGraph->GetXaxis()->SetTitle("Number of overlaid hits");
+			break;
+		}
+		case OVERLAID_HITS_PERCENTAGE:
+		{
+			pMultiGraph->GetYaxis()->SetTitle("# events (normalized to unity)");
+			pMultiGraph->GetXaxis()->SetTitle("Percentage of overlaid hits");
+			break;
+		}
 	}
 }
 
+//--------------------------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------------------------
+
+OverlayCheckPlotAnalysis::OverlayCheckPlotAnalysis() :
+		m_textLabel("CALICE SDHCAL"),
+		m_treeName("PfoMonitoring")
+{
+	// set default parameters
+	SetParameters(TB_SPS_AUG_2012);
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayCheckPlotAnalysis::SetParameters(DataType dataType, unsigned int neutralEnergy, unsigned int chargedEnergy,
+		unsigned int smallDistance, unsigned int wideDistance)
+{
+	m_dataType = dataType;
+	m_neutralEnergy = neutralEnergy;
+	m_chargedEnergy = chargedEnergy;
+	m_smallDistance = smallDistance;
+	m_wideDistance = wideDistance;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayCheckPlotAnalysis::SetFileParameters(const std::string &fileDirectory, const std::string &treeName)
+{
+	m_fileDirectory = fileDirectory;
+	m_treeName = treeName;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayCheckPlotAnalysis::SetTextLabel(const std::string &text)
+{
+	m_textLabel = text;
+}
+
+//--------------------------------------------------------------------------------------------------------------------
+
+void OverlayCheckPlotAnalysis::Run()
+{
+	// configure plots
+	TH1F *pSmallDistanceNeutralEnergy = new TH1F("SmallDisNeuErj", "", 301, 0, 100);
+	pSmallDistanceNeutralEnergy->SetLineColor(kRed);
+	pSmallDistanceNeutralEnergy->SetLineWidth(2);
+	pSmallDistanceNeutralEnergy->GetXaxis()->SetTitle("E_{rec} [GeV]");
+	pSmallDistanceNeutralEnergy->GetXaxis()->SetTitleSize(0.045);
+	pSmallDistanceNeutralEnergy->GetXaxis()->SetRangeUser(0, 30);
+	pSmallDistanceNeutralEnergy->GetYaxis()->SetTitle("#entries");
+	pSmallDistanceNeutralEnergy->GetYaxis()->SetTitleOffset(1.5);
+	pSmallDistanceNeutralEnergy->GetYaxis()->SetTitleSize(0.045);
+
+	TH1F *pWideDistanceNeutralEnergy = new TH1F("WideDisNeuErj", "", 301, 0, 100);
+	pWideDistanceNeutralEnergy->SetLineColor(kBlack);
+	pWideDistanceNeutralEnergy->SetLineWidth(2);
+
+	TH1F *pChargedEnergy = new TH1F("ChErj", "", 91, 0, 30);
+	pChargedEnergy->SetLineColor(kBlue);
+	pChargedEnergy->SetLineWidth(2);
+	pChargedEnergy->SetLineWidth(2);
+	pChargedEnergy->GetXaxis()->SetTitle("E_{rec} [GeV]");
+	pChargedEnergy->GetXaxis()->SetTitleSize(0.045);
+	pChargedEnergy->GetXaxis()->SetRangeUser(0, 30);
+	pChargedEnergy->GetYaxis()->SetTitle("#entries");
+	pChargedEnergy->GetYaxis()->SetTitleOffset(1.5);
+	pChargedEnergy->GetYaxis()->SetTitleSize(0.045);
+
+	// construct and open files
+	std::string completeSmallDistanceFileName =
+			m_fileDirectory
+		  + GetDataName(m_dataType)
+		  + "/"
+		  + GetFileName(m_neutralEnergy, m_chargedEnergy, m_smallDistance, m_dataType);
+
+	std::string completeWideDistanceFileName =
+			m_fileDirectory
+		  + GetDataName(m_dataType)
+		  + "/"
+		  + GetFileName(m_neutralEnergy, m_chargedEnergy, m_wideDistance, m_dataType);
+
+	TFile *pSmallFile = TFile::Open(completeSmallDistanceFileName.c_str());
+	TFile *pWideFile  = TFile::Open(completeWideDistanceFileName.c_str());
+
+	if( ! pSmallFile )
+		throw std::runtime_error("Wrong file name (small distance) !");
+
+	if( ! pWideFile )
+		throw std::runtime_error("Wrong file name (wide distance) !");
+
+	// perform tree analysis
+	TTree *pSmallTree = (TTree *) pSmallFile->Get(m_treeName.c_str());
+	TTree *pWideTree  = (TTree *) pWideFile->Get(m_treeName.c_str());
+
+	if( ! pSmallTree || ! pWideTree )
+		throw std::runtime_error("Wrong tree name !");
+
+	TreeAnalyzer treeSmallAnalyzer(pSmallTree);
+	TreeAnalyzer treeWideAnalyzer(pWideTree);
+
+	treeSmallAnalyzer.FillNeutralMCEnergy(pSmallDistanceNeutralEnergy);
+	treeWideAnalyzer.FillNeutralMCEnergy(pWideDistanceNeutralEnergy);
+	treeWideAnalyzer.FillChargedMCEnergy(pChargedEnergy);
+
+	// plot contents
+	TCanvas *pCanvas = CreateCanvas("OverlayEvent_checkOverlayEnergy", "Overlay energy comparison");
+	pCanvas->cd();
+
+	gStyle->SetOptStat(0);
+
+	pSmallDistanceNeutralEnergy->Draw();
+	pWideDistanceNeutralEnergy->Draw("same");
+
+	std::stringstream titleStr;
+	std::stringstream meanStr;
+	std::stringstream rmsStr;
+
+	TPaveText *stats = new TPaveText(0.68,0.635,0.88,0.8,"nbNDC");
+	stats->SetName("statsE1");
+	stats->SetBorderSize(0);
+	stats->SetFillColor(0);
+	stats->SetLineColor(kRed);
+	stats->SetLineWidth(1);
+	stats->SetTextAlign(12);
+	stats->SetTextFont(42);
+	stats->SetTextColor(kRed);
+	stats->SetTextSize(0.04);
+
+	titleStr   << m_smallDistance << " cm distance";
+	meanStr    << "Mean    = " << pSmallDistanceNeutralEnergy->GetMean();
+	rmsStr     << "RMS     = " << pSmallDistanceNeutralEnergy->GetRMS();
+
+	stats->AddText(titleStr.str().c_str());
+	stats->AddText(meanStr.str().c_str());
+	stats->AddText(rmsStr.str().c_str());
+	stats->Draw();
+
+	titleStr.str("");
+	meanStr.str("");
+	rmsStr.str("");
+
+	stats = new TPaveText(0.68,0.635,0.88,0.8,"nbNDC");
+	stats->SetName("statsE2");
+	stats->SetBorderSize(0);
+	stats->SetFillColor(0);
+	stats->SetLineColor(kBlack);
+	stats->SetLineWidth(1);
+	stats->SetTextAlign(12);
+	stats->SetTextFont(42);
+	stats->SetTextColor(kBlack);
+	stats->SetTextSize(0.04);
+
+	titleStr   << m_wideDistance << " cm distance";
+	meanStr    << "Mean    = " << pWideDistanceNeutralEnergy->GetMean();
+	rmsStr     << "RMS     = " << pWideDistanceNeutralEnergy->GetRMS();
+
+	stats->AddText(titleStr.str().c_str());
+	stats->AddText(meanStr.str().c_str());
+	stats->AddText(rmsStr.str().c_str());
+	stats->Draw();
+
+	if( ! m_textLabel.empty() )
+	{
+		TPaveText *pt = new TPaveText(0.3, 0.2, 0.93, 0.3, "tbNDC");
+		pt->SetTextSize(0.05);
+		pt->SetTextColor(kGray+2);
+		pt->SetFillColor(0);
+		pt->SetLineWidth(0);
+		pt->SetBorderSize(0);
+		pt->AddText( m_textLabel.c_str() );
+		pt->SetTextFont(62);
+		pt->Draw();
+	}
+
+//	pCanvas = CreateCanvas("OverlayEvent_checkOverlayChEnergy", "Charged energy before overlay");
+//	pCanvas->cd();
+//
+//	gStyle->SetOptStat(0);
+
+	pChargedEnergy->Draw("same");
+
+	titleStr.str("");
+	meanStr.str("");
+	rmsStr.str("");
+
+	stats = new TPaveText(0.68,0.635,0.88,0.8,"nbNDC");
+	stats->SetName("statsChE");
+	stats->SetBorderSize(0);
+	stats->SetFillColor(0);
+	stats->SetLineColor(kBlack);
+	stats->SetLineWidth(1);
+	stats->SetTextAlign(12);
+	stats->SetTextFont(42);
+	stats->SetTextColor(kBlue);
+	stats->SetTextSize(0.04);
+
+	titleStr   << "Before overlay";
+	meanStr    << "Mean    = " << pChargedEnergy->GetMean();
+	rmsStr     << "RMS     = " << pChargedEnergy->GetRMS();
+
+	stats->AddText(titleStr.str().c_str());
+	stats->AddText(meanStr.str().c_str());
+	stats->AddText(rmsStr.str().c_str());
+	stats->Draw();
+
+//	if( ! m_textLabel.empty() )
+//	{
+//		TPaveText *pt = new TPaveText(0.3, 0.2, 0.93, 0.3, "tbNDC");
+//		pt->SetTextSize(0.05);
+//		pt->SetTextColor(kGray+2);
+//		pt->SetFillColor(0);
+//		pt->SetLineWidth(0);
+//		pt->SetBorderSize(0);
+//		pt->AddText( m_textLabel.c_str() );
+//		pt->SetTextFont(62);
+//		pt->Draw();
+//	}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+//	return pCanvas;
+}

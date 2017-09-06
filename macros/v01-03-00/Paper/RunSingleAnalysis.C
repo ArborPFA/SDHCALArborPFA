@@ -23,34 +23,36 @@ void RunSingleAnalysis()
 
 	// for TB comparison (No PFA vs ArborPFA)
 	 dataTypeVector.push_back(TB_SPS_AUG_2012_NO_PFA);
-	 dataTypeVector.push_back(TB_SPS_AUG_2012);
+	 // dataTypeVector.push_back(TB_SPS_AUG_2012);
 
 	// for simulation comparison (No PFA vs ArborPFA)
-//	dataTypeVector.push_back(FTFP_BERT_HP_NO_PFA);
-//	dataTypeVector.push_back(FTFP_BERT_HP);
-//	dataTypeVector.push_back(FTF_BIC_NO_PFA);
-//	dataTypeVector.push_back(FTF_BIC);
+	dataTypeVector.push_back(FTFP_BERT_HP_NO_PFA);
+	// dataTypeVector.push_back(FTFP_BERT_HP);
+	// dataTypeVector.push_back(FTF_BIC_NO_PFA);
+	// dataTypeVector.push_back(FTF_BIC);
 
 	// for PFA only comparison (default)
-//	 dataTypeVector.push_back(TB_SPS_AUG_2012);
-//	 dataTypeVector.push_back(FTFP_BERT_HP);
-//	 dataTypeVector.push_back(FTF_BIC);
+	dataTypeVector.push_back(TB_SPS_AUG_2012);
+	dataTypeVector.push_back(FTFP_BERT_HP);
+	dataTypeVector.push_back(FTF_BIC);
 
 	SingleAnalysis analysis;
 
-	analysis.SetFileParameters("/home/rete/soft/SDHCALArborPFA/output/v01-04-00/SingleParticle/");
+	analysis.SetFileParameters("/home/rete/soft/SDHCALArborPFA/output/v01-04-00/Paper/SingleParticle/");
+//	analysis.SetFileParameters("/home/rete/soft/SDHCALArborPFA/output/v01-04-00/SingleParticle/");
 	analysis.SetEnergies(energies);
 	analysis.SetDataTypeList(dataTypeVector);
 	analysis.SetComputeSystematics(true);
+//	analysis.SetComputeSystematics(false);
+//	analysis.SetLabel("Preliminary");
+	analysis.SetLabel("CALICE SDHCAL");
 
-	//	analysis.SetSaveGraphs();
+//	analysis.SetSaveGraphs();
 	analysis.Run();
-	
+
 	while(1)
 	{
 		gSystem->ProcessEvents();
 		gSystem->Sleep(10);
 	}
 }
-
-
